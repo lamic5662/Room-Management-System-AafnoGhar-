@@ -1,0 +1,22 @@
+flowchart TD
+  A[Owner selects map pin] --> B[Reverse geocode (Nominatim)]
+  A --> C[Nearby places (Overpass)]
+  C --> C1[Hospitals]
+  C --> C2[Colleges/Universities]
+  C --> C3[Bus Stops]
+  C --> C4[Markets]
+  B --> D[Room.location text saved]
+  C --> E[Room.nearby names saved]
+  A --> F[Room.geo saved]
+
+  F --> G[Tenant views Room Details]
+  E --> G
+  G --> H[Show map + pins]
+  G --> I[Show nearby list]
+
+  F --> J[Distance from user]
+  J --> K[Rooms list sorted by nearest]
+
+  F --> L[Price suggestion]
+  L --> M[Nearby rent median if enough data]
+  L --> N[City baseline fallback]
