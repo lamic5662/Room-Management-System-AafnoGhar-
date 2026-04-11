@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import http from "../api/http";
 import { useToast } from "../context/ToastContext";
 import { useI18n } from "../context/I18nContext";
@@ -152,13 +152,6 @@ export default function ResetPassword() {
           </button>
         </form>
 
-        <div className="spacer" />
-
-        <div style={{ textAlign: "center" }} className="muted">
-          <Link to="/login" style={{ fontWeight: 900, color: "#111827" }}>
-            {t("Back to Login")}
-          </Link>
-        </div>
       </div>
     </div>
   );

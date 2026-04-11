@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { Link } from "react-router-dom";
 import http from "../api/http";
 import { useToast } from "../context/ToastContext";
 import { useI18n } from "../context/I18nContext";
@@ -75,13 +74,6 @@ export default function ForgotPassword() {
           </div>
         ) : null}
 
-        <div className="spacer" />
-
-        <div style={{ textAlign: "center" }} className="muted">
-          <Link to="/login" style={{ fontWeight: 900, color: "#111827" }}>
-            {t("Back to Login")}
-          </Link>
-        </div>
       </div>
     </div>
   );

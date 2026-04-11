@@ -13,9 +13,11 @@ const paymentSchema = new mongoose.Schema(
 
         amount: { type: Number, required: true, min: 0 }, // total paid (rent + electricity)
         rentAmount: { type: Number, default: 0, min: 0 },
+        exitAmount: { type: Number, default: 0, min: 0 },
         carryCreditApplied: { type: Number, default: 0, min: 0 },
         electricityAmount: { type: Number, default: 0, min: 0 },
         electricityBill: { type: mongoose.Schema.Types.ObjectId, ref: "ElectricityBill", default: null },
+        exitRequest: { type: mongoose.Schema.Types.ObjectId, ref: "ExitRequest", default: null },
 
         method: {
             type: String,

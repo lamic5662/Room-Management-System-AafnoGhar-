@@ -13,7 +13,7 @@ export default function Navbar() {
   const [notifOpen, setNotifOpen] = useState(false);
   const [kycSummary, setKycSummary] = useState({ pending: 0, approved: 0 });
   const { lang, setLang, t } = useI18n();
-  const { items: notifications, unread, markRead, markAllRead, deleteNotification } = useNotifications();
+  const { items: notifications, unread, markRead, markAllRead, deleteNotification, deleteAllRead } = useNotifications();
   const location = useLocation();
   const menuRef = useRef(null);
   const notifRef = useRef(null);
@@ -31,8 +31,11 @@ export default function Navbar() {
     "navItem " + (isActive ? "navActive" : "");
 
   const Icon = ({ children }) => <span className="navIcon">{children}</span>;
+  const isStaffRole = user?.role === "admin" || user?.role === "super_admin" || user?.role === "moderator";
+  const isAdminRole = user?.role === "admin" || user?.role === "super_admin";
+  const isSuperAdmin = user?.role === "super_admin";
   const dashPath =
-    user?.role === "admin"
+    isStaffRole
       ? "/admin/dashboard"
       : user?.role === "owner"
         ? "/owner/dashboard"
@@ -65,12 +68,12 @@ export default function Navbar() {
   }, [location.pathname]);
 
   useEffect(() => {
-    if (user?.role !== "admin") {
+    if (!isAdminRole) {
       setKycSummary({ pending: 0, approved: 0 });
       return;
     }
     loadKycSummary();
-  }, [user?.role]);
+  }, [isAdminRole, user?.role]);
 
   useEffect(() => {
     const onDocClick = (e) => {
@@ -127,10 +130,16 @@ export default function Navbar() {
         return "/tenant/payments";
       case "complaint":
         return user?.role === "owner" ? "/owner/complaints" : "/tenant/complaints";
+      case "chat":
+        return n.data?.url || (user?.role === "owner" ? "/owner/agreements" : "/tenant/agreements");
       case "exit":
         return user?.role === "owner" ? "/owner/exits" : "/tenant/exits";
+      case "visit":
+        return user?.role === "owner" ? "/owner/visits" : "/tenant/visits";
+      case "review":
+        return n.data?.url || (n.data?.roomId ? `/rooms/${n.data.roomId}#ratings` : null);
       case "kyc":
-        return user?.role === "admin" ? "/admin/kyc" : user?.role === "owner" ? "/owner/kyc" : "/tenant/kyc";
+        return isAdminRole ? "/admin/kyc" : user?.role === "owner" ? "/owner/kyc" : "/tenant/kyc";
       case "fraud":
         return "/admin/flagged-rooms";
       default:
@@ -174,7 +183,10 @@ export default function Navbar() {
                   <span aria-hidden="true">☰</span> {t("Menu")}
                 </button>
                 <div className="navMenuList">
+                  <NavLink className="navMenuItem" to="/daily-rent" onClick={() => setMenuOpen(false)}>{t("Daily Rent")}</NavLink>
+                  <NavLink className="navMenuItem" to="/tenant/saved-searches" onClick={() => setMenuOpen(false)}>{t("Saved searches")}</NavLink>
                   <NavLink className="navMenuItem" to="/tenant/requests" onClick={() => setMenuOpen(false)}>{t("Requests")}</NavLink>
+                  <NavLink className="navMenuItem" to="/tenant/visits" onClick={() => setMenuOpen(false)}>{t("Visits")}</NavLink>
                   <NavLink className="navMenuItem" to="/tenant/offers" onClick={() => setMenuOpen(false)}>{t("My Offers")}</NavLink>
                   <NavLink className="navMenuItem" to="/tenant/agreements" onClick={() => setMenuOpen(false)}>{t("Agreements")}</NavLink>
                   <NavLink className="navMenuItem" to="/tenant/payments" onClick={() => setMenuOpen(false)}>{t("Payments")}</NavLink>
@@ -201,9 +213,11 @@ export default function Navbar() {
                   <span aria-hidden="true">☰</span> {t("Menu")}
                 </button>
                 <div className="navMenuList">
+                  <NavLink className="navMenuItem" to="/daily-rent" onClick={() => setMenuOpen(false)}>{t("Daily Rent")}</NavLink>
                   <NavLink className="navMenuItem" to="/owner/my-rooms" onClick={() => setMenuOpen(false)}>{t("My Rooms")}</NavLink>
                   <NavLink className="navMenuItem" to="/owner/add-room" onClick={() => setMenuOpen(false)}>{t("Add Room")}</NavLink>
                   <NavLink className="navMenuItem" to="/owner/requests" onClick={() => setMenuOpen(false)}>{t("Requests")}</NavLink>
+                  <NavLink className="navMenuItem" to="/owner/visits" onClick={() => setMenuOpen(false)}>{t("Visits")}</NavLink>
                   <NavLink className="navMenuItem" to="/owner/agreements" onClick={() => setMenuOpen(false)}>{t("Agreements")}</NavLink>
                   <NavLink className="navMenuItem" to="/owner/payments" onClick={() => setMenuOpen(false)}>{t("Payments")}</NavLink>
                   <NavLink className="navMenuItem" to="/owner/complaints" onClick={() => setMenuOpen(false)}>{t("Complaints")}</NavLink>
@@ -215,7 +229,7 @@ export default function Navbar() {
             </>
           )}
 
-          {user?.role === "admin" && (
+          {isStaffRole && (
             <>
               <NavLink className={navClass} to="/admin/dashboard">
                 <Icon>
@@ -230,17 +244,24 @@ export default function Navbar() {
                   <span aria-hidden="true">☰</span> {t("Menu")}
                 </button>
                 <div className="navMenuList">
-                  <NavLink className="navMenuItem" to="/admin/users" onClick={() => setMenuOpen(false)}>{t("Users")}</NavLink>
+                  {isSuperAdmin ? (
+                    <>
+                      <NavLink className="navMenuItem" to="/admin/users" onClick={() => setMenuOpen(false)}>{t("Users")}</NavLink>
+                      <NavLink className="navMenuItem" to="/admin/audit-logs" onClick={() => setMenuOpen(false)}>Audit Logs</NavLink>
+                    </>
+                  ) : null}
                   <NavLink className="navMenuItem" to="/admin/flagged-rooms" onClick={() => setMenuOpen(false)}>{t("Flagged Rooms")}</NavLink>
-                  <NavLink className="navMenuItem" to="/admin/kyc" onClick={() => setMenuOpen(false)}>
-                    {t("KYC")}
-                    <span
-                      className="badge"
-                      style={{ marginLeft: 6, padding: "4px 8px", fontSize: 11 }}
-                    >
-                      {kycSummary.pending}/{kycSummary.approved}
-                    </span>
-                  </NavLink>
+                  {isAdminRole ? (
+                    <NavLink className="navMenuItem" to="/admin/kyc" onClick={() => setMenuOpen(false)}>
+                      {t("KYC")}
+                      <span
+                        className="badge"
+                        style={{ marginLeft: 6, padding: "4px 8px", fontSize: 11 }}
+                      >
+                        {kycSummary.pending}/{kycSummary.approved}
+                      </span>
+                    </NavLink>
+                  ) : null}
                 </div>
               </div>
             </>
@@ -249,13 +270,13 @@ export default function Navbar() {
 
         <div className="navRight">
           {user?.role ? (
-            <NavLink className="navIconBtn navDashBtn" to={dashPath} aria-label={t("Dashboard")}>
+            <NavLink className="navIconBtn navDashBtn" to={dashPath} data-tip={t("Dashboard")} aria-label={t("Dashboard")}>
               <svg viewBox="0 0 24 24" aria-hidden="true">
                 <path d="M4 13h7V4H4v9zm9 7h7V4h-7v16zM4 20h7v-5H4v5z" />
               </svg>
             </NavLink>
           ) : null}
-          <NavLink className="navIconBtn" to="/rooms" aria-label={t("Rooms")}>
+          <NavLink className="navIconBtn" to="/rooms" data-tip={t("Rooms")} aria-label={t("Rooms")}>
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1v-9z" />
             </svg>
@@ -266,6 +287,7 @@ export default function Navbar() {
                 type="button"
                 className="navIconBtn"
                 onClick={() => setNotifOpen((v) => !v)}
+                data-tip={t("Notifications")}
                 aria-label={t("Notifications")}
                 title={t("Notifications")}
               >
@@ -279,9 +301,14 @@ export default function Navbar() {
                 <div className="navNotifPanel">
                   <div className="navNotifHeader">
                     <div className="navNotifTitle">{t("Notifications")}</div>
-                    <button className="navNotifMark" type="button" onClick={markAllRead}>
-                      {t("Mark all")}
-                    </button>
+                    <div className="row" style={{ gap: 8 }}>
+                      <button className="navNotifMark" type="button" onClick={markAllRead}>
+                        {t("Mark all")}
+                      </button>
+                      <button className="navNotifMark" type="button" onClick={deleteAllRead}>
+                        {t("Delete read")}
+                      </button>
+                    </div>
                   </div>
 
                   {notifications.length === 0 ? (
@@ -303,6 +330,7 @@ export default function Navbar() {
                             <button
                               type="button"
                               className="navNotifDelete"
+                              data-tip={t("Delete notification")}
                               aria-label={t("Delete notification")}
                               onClick={(event) => {
                                 event.stopPropagation();
@@ -325,6 +353,7 @@ export default function Navbar() {
               type="button"
               className="navLangBtn"
               onClick={() => setLangOpen((v) => !v)}
+              data-tip={t("Language")}
               title={t("Language")}
               aria-label="Language"
             >
@@ -370,7 +399,7 @@ export default function Navbar() {
                   <div className="navUserRole">{user.role}</div>
                 </div>
               </Link>
-              <button className="navIconBtn" onClick={logout} title={t("Logout")} aria-label={t("Logout")}>
+              <button className="navIconBtn" onClick={logout} data-tip={t("Logout")} title={t("Logout")} aria-label={t("Logout")}>
                 <svg viewBox="0 0 24 24" aria-hidden="true">
                   <path d="M10 3h8a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1h-8v-2h7V5h-7V3zm-6 9 4-4v3h7v2H8v3l-4-4z" />
                 </svg>

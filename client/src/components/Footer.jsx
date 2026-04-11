@@ -34,6 +34,7 @@ export default function Footer() {
             <Link to="/tenant/dashboard" className="footerLink">{t("Dashboard")}</Link>
             <Link to="/tenant/agreements" className="footerLink">{t("Agreements")}</Link>
             <Link to="/tenant/payments" className="footerLink">{t("Payments")}</Link>
+            <Link to="/tenant/saved-searches" className="footerLink">{t("Saved searches")}</Link>
           </div>
         </div>
       </div>

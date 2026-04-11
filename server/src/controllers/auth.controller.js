@@ -4,9 +4,11 @@ import jwt from "jsonwebtoken";
 import User from "../models/User.js";
 import { sendResetEmail } from "../utils/mailer.js";
 
+const defaultTtl = process.env.JWT_TTL || "7d";
+
 // helper to make token
 const makeToken = (userId) => {
-    return jwt.sign({ id: userId }, process.env.JWT_SECRET, { expiresIn: "7d" });
+    return jwt.sign({ id: userId }, process.env.JWT_SECRET, { expiresIn: defaultTtl });
 };
 
 // POST /api/auth/register

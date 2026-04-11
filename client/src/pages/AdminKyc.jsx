@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import http from "../api/http";
 import Spinner from "../components/Spinner";
@@ -6,20 +6,25 @@ import Modal from "../components/Modal";
 import { useToast } from "../context/ToastContext";
 import { getPhotoUrl } from "../utils/photo";
 
+const VALID_TABS = ["pending", "approved"];
+const getTabFromSearch = (search) => {
+  const params = new URLSearchParams(search);
+  const requested = params.get("tab");
+  return VALID_TABS.includes(requested) ? requested : "pending";
+};
+
 export default function AdminKyc() {
   const { showToast } = useToast();
+  const location = useLocation();
+  const navigate = useNavigate();
 
+  const tab = useMemo(() => getTabFromSearch(location.search), [location.search]);
   const [loading, setLoading] = useState(true);
   const [items, setItems] = useState([]);
   const [busyId, setBusyId] = useState("");
-  const [tab, setTab] = useState("pending");
-
   const [summary, setSummary] = useState({ pending: 0, approved: 0 });
-  const location = useLocation();
-  const navigate = useNavigate();
   const goToTab = (target) => {
-    if (!["pending", "approved"].includes(target)) return;
-    setTab(target);
+    if (!VALID_TABS.includes(target)) return;
     navigate(`/admin/kyc?tab=${target}`, { replace: true });
   };
 
@@ -64,15 +69,6 @@ export default function AdminKyc() {
     load(tab);
     loadSummary();
   }, [tab]);
-
-  useEffect(() => {
-    const params = new URLSearchParams(location.search);
-    const requestedTab = params.get("tab");
-    if (requestedTab && requestedTab !== tab && ["pending", "approved"].includes(requestedTab)) {
-      setTab(requestedTab);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [location.search]);
 
   const approve = async () => {
     if (!selected?._id) return;
@@ -142,7 +138,6 @@ export default function AdminKyc() {
             Review documents submitted by owners and tenants.
           </p>
         </div>
-        <button className="btn btnOutline" onClick={() => navigate("/admin/dashboard")}>Back to dashboard</button>
       </div>
 
       <div className="spacer" />
@@ -185,6 +180,9 @@ export default function AdminKyc() {
         <div className="gridCards">
           {items.map((u) => {
             const isBusy = busyId === u._id;
+            const submittedAt = u?.kyc?.submittedAt
+              ? new Date(u.kyc.submittedAt).toLocaleString()
+              : "";
 
             const frontRaw = u?.kyc?.docFrontUrl || u?.kyc?.documentFrontUrl;
             const backRaw = u?.kyc?.docBackUrl || u?.kyc?.documentBackUrl;
@@ -200,14 +198,26 @@ export default function AdminKyc() {
             return (
               <div key={u._id} className="card cardPad">
                 <div className="row" style={{ justifyContent: "space-between", alignItems: "flex-start" }}>
-                  <div>
+                <div>
                     <div style={{ fontWeight: 900, fontSize: 16 }}>{u.fullName}</div>
                     <div className="muted" style={{ marginTop: 4, fontSize: 13 }}>
                       {u.email} • {u.phone} • role: <b style={{ color: "#111827" }}>{u.role}</b>
                     </div>
-                  </div>
-                  <span className="badge">{tab === "approved" ? "APPROVED" : "PENDING"}</span>
                 </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <span className="badge">{tab === "approved" ? "APPROVED" : "PENDING"}</span>
+                  {u.kyc?.resubmitted ? (
+                    <span className="badge badgeWarning" style={{ borderColor: "#f97316", background: "rgba(249,115,22,0.08)", color: "#c2410c" }}>
+                      RESUBMITTED
+                    </span>
+                  ) : null}
+                </div>
+              </div>
+              {submittedAt ? (
+                <div className="muted" style={{ marginTop: 6, fontSize: 12, whiteSpace: "normal" }}>
+                  {tab === "approved" ? "Approved" : "Submitted"}: {submittedAt}
+                </div>
+              ) : null}
 
                 {fieldRows.length ? (
                   <div className="card cardPad" style={{ marginTop: 10, boxShadow: "none", borderRadius: 14 }}>
@@ -222,10 +232,10 @@ export default function AdminKyc() {
                   </div>
                 ) : null}
 
-                {(front || back || selfie || docs.length) ? (
-                  <>
-                    <div className="spacer" />
-                    <div className="kycGrid">
+            {(front || back || selfie || docs.length) ? (
+              <>
+                <div className="spacer" />
+                <div className="kycGrid">
                       {front ? <KycImg title="Doc Front" src={front} onPreview={setPreviewSrc} /> : null}
                       {back ? <KycImg title="Doc Back" src={back} onPreview={setPreviewSrc} /> : null}
                       {selfie ? <KycImg title="Selfie" src={selfie} onPreview={setPreviewSrc} /> : null}
@@ -235,14 +245,36 @@ export default function AdminKyc() {
                           ))
                         : null}
                     </div>
-                  </>
-                ) : (
-                  <div className="muted" style={{ marginTop: 10, fontSize: 13 }}>
-                    No KYC images found in API response (still OK).
-                  </div>
-                )}
+                </>
+              ) : (
+                <div className="muted" style={{ marginTop: 10, fontSize: 13 }}>
+                  No KYC images found in API response (still OK).
+                </div>
+              )}
 
-                <div className="spacer" />
+              {u.kyc?.history?.length ? (
+                <div className="kycHistoryListCompact">
+                  {u.kyc.history.slice(0, 3).map((entry) => (
+                    <div key={`${entry.createdAt}-${entry.action}`} className="kycHistoryItemCompact">
+                      <div>
+                        <div className="kycHistoryActionCompact">
+                          {entry.action === "submitted" ? "Submitted" : "Updated"}
+                          {" • "}
+                          {formatDocTypeLabel(entry.docType)}
+                        </div>
+                        <div className="muted" style={{ fontSize: 12 }}>
+                          {entry.actor?.role?.toUpperCase()}
+                        </div>
+                      </div>
+                      <div className="muted" style={{ fontSize: 12 }}>
+                        {new Date(entry.createdAt).toLocaleString()}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+
+              <div className="spacer" />
 
                 {tab === "pending" ? (
                   <div className="row" style={{ justifyContent: "flex-end", flexWrap: "wrap" }}>
@@ -330,7 +362,15 @@ export default function AdminKyc() {
 
       {previewSrc ? (
         <div className="modalBg" onClick={() => setPreviewSrc("")}>
-          <div className="modal" onClick={(event) => event.stopPropagation()}>
+          <div className="modal modalWithClose" onClick={(event) => event.stopPropagation()}>
+            <button
+              type="button"
+              className="modalClose"
+              onClick={() => setPreviewSrc("")}
+              aria-label="Close preview"
+            >
+              ×
+            </button>
             <div className="spacer" />
             <div className="card" style={{ borderRadius: 16, overflow: "hidden", boxShadow: "none", background: "#f3f4f6" }}>
               <img
@@ -435,4 +475,16 @@ function buildKycFieldRows(docType, fields) {
   add("Issue Date (BS)", f.issueDate);
   add("DOB (BS)", f.dob);
   return rows;
+}
+
+const docTypeLabels = {
+  citizenship: "Citizenship",
+  house_paper: "House Paper",
+  college_id: "College ID",
+  job_id: "Job ID",
+  other: "Other Document",
+};
+
+function formatDocTypeLabel(type) {
+  return docTypeLabels[type] || type;
 }

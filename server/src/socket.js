@@ -1,5 +1,6 @@
 import { Server } from "socket.io";
 import jwt from "jsonwebtoken";
+import Agreement from "./models/Agreement.js";
 
 let io;
 
@@ -28,6 +29,26 @@ export const initSocket = (httpServer) => {
     if (socket.userId) {
       socket.join(`user:${socket.userId}`);
     }
+
+    socket.on("chat:typing", async (payload) => {
+      try {
+        const agreementId = payload?.agreementId;
+        if (!agreementId || !socket.userId) return;
+        const agreement = await Agreement.findById(agreementId).select("owner tenant");
+        if (!agreement) return;
+        const uid = String(socket.userId);
+        if (uid !== String(agreement.owner) && uid !== String(agreement.tenant)) return;
+        const otherUserId = uid === String(agreement.owner) ? agreement.tenant : agreement.owner;
+        if (!otherUserId) return;
+        io.to(`user:${otherUserId}`).emit("chat:typing", {
+          agreementId: String(agreement._id),
+          userId: uid,
+          isTyping: !!payload?.isTyping,
+        });
+      } catch {
+        // ignore
+      }
+    });
   });
 
   return io;

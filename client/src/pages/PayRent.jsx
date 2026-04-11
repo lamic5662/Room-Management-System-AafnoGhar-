@@ -1,13 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useLocation } from "react-router-dom";
 import http from "../api/http";
 import { useToast } from "../context/ToastContext";
 import { submitEsewaForm } from "../utils/submitEsewaForm";
 import { useI18n } from "../context/I18nContext";
 
+const PERIOD_PATTERN = /^\d{4}-(0[1-9]|1[0-2])$/;
+
 export default function PayRent() {
   const { agreementId } = useParams();
   const navigate = useNavigate();
+  const { search } = useLocation();
   const { showToast } = useToast();
   const { t } = useI18n();
 
@@ -16,6 +19,8 @@ export default function PayRent() {
   const [method, setMethod] = useState("cash");
   const [note, setNote] = useState("Paid in hand");
   const [loading, setLoading] = useState(false);
+  const [electricityUnits, setElectricityUnits] = useState("");
+  const [electricityUnitRate, setElectricityUnitRate] = useState("");
   const [billInfo, setBillInfo] = useState({
     rentAmount: 0,
     electricityAmount: 0,
@@ -25,6 +30,19 @@ export default function PayRent() {
     rentPending: false,
     dueRent: 0,
     dueElectricity: 0,
+    expectedRent: 0,
+    paidRent: 0,
+    damagesCost: 0,
+    otherDeductions: 0,
+    depositPaid: 0,
+    settlementDue: 0,
+    hasSettlement: false,
+    rentPerDay: 0,
+    daysInMonth: 0,
+    daysCharged: 0,
+    proratedFirstMonth: false,
+    startDate: null,
+    roomElectricityUnitRate: 0,
     payable: true,
   });
   const [cardName, setCardName] = useState("");
@@ -33,6 +51,10 @@ export default function PayRent() {
   const [cardCvv, setCardCvv] = useState("");
   const [cardFlip, setCardFlip] = useState(false);
   const [errors, setErrors] = useState({});
+  const exitIdParam = useMemo(() => {
+    const params = new URLSearchParams(search);
+    return params.get("exitId") || "";
+  }, [search]);
 
   const isBank = method === "bank";
   const formattedExpiry = useMemo(() => {
@@ -47,11 +69,28 @@ export default function PayRent() {
     return `**** **** **** ${last4.padStart(4, "•")}`;
   }, [cardNumber]);
 
+  const computedElectricity = useMemo(() => {
+    const units = Number(electricityUnits);
+    const rate = Number(electricityUnitRate);
+    if (!Number.isFinite(units) || units <= 0) return 0;
+    if (!Number.isFinite(rate) || rate <= 0) return 0;
+    return Math.round(units * rate);
+  }, [electricityUnits, electricityUnitRate]);
+
+  const showElectricityInputs = !exitIdParam && !billInfo.bill && !billInfo.rentPaid && !billInfo.rentPending;
+  const displayElectricity = exitIdParam || billInfo.bill ? billInfo.dueElectricity || 0 : computedElectricity;
+  const baseTotal = billInfo.totalAmount || billInfo.dueRent || 0;
+  const displayTotal = exitIdParam || billInfo.bill
+    ? billInfo.totalAmount || 0
+    : baseTotal + computedElectricity;
+  const canPay = billInfo.payable || (showElectricityInputs && computedElectricity > 0);
+
   useEffect(() => {
     const loadBill = async () => {
       if (!agreementId || !period || !/^\d{4}-(0[1-9]|1[0-2])$/.test(period)) return;
       try {
-        const res = await http.get(`/api/electricity/for-payment?agreementId=${agreementId}&period=${period}`);
+        const exitParam = exitIdParam ? `&exitId=${encodeURIComponent(exitIdParam)}` : "";
+        const res = await http.get(`/api/electricity/for-payment?agreementId=${agreementId}&period=${period}${exitParam}`);
         const next = {
           rentAmount: res.data?.rentAmount || 0,
           electricityAmount: res.data?.electricityAmount || 0,
@@ -61,10 +100,24 @@ export default function PayRent() {
           rentPending: !!res.data?.rentPending,
           dueRent: res.data?.dueRent || 0,
           dueElectricity: res.data?.dueElectricity || 0,
+          expectedRent: res.data?.expectedRent || 0,
+          paidRent: res.data?.paidRent || 0,
+          damagesCost: res.data?.damagesCost || 0,
+          otherDeductions: res.data?.otherDeductions || 0,
+          depositPaid: res.data?.depositPaid || 0,
+          settlementDue: res.data?.settlementDue || 0,
+          hasSettlement: !!res.data?.hasSettlement,
+          rentPerDay: res.data?.rentPerDay || 0,
+          daysInMonth: res.data?.daysInMonth || 0,
+          daysCharged: res.data?.daysCharged || 0,
+          proratedFirstMonth: !!res.data?.proratedFirstMonth,
+          startDate: res.data?.startDate || null,
+          roomElectricityUnitRate: res.data?.roomElectricityUnitRate || 0,
           payable: res.data?.payable !== false,
         };
         setBillInfo(next);
-        setAmount(next.totalAmount ? String(next.totalAmount) : "");
+        const nextAmount = next.totalAmount ?? next.dueRent ?? 0;
+        setAmount(nextAmount ? String(nextAmount) : "");
       } catch {
         setBillInfo({
           rentAmount: 0,
@@ -75,6 +128,19 @@ export default function PayRent() {
           rentPending: false,
           dueRent: 0,
           dueElectricity: 0,
+          expectedRent: 0,
+          paidRent: 0,
+          damagesCost: 0,
+          otherDeductions: 0,
+          depositPaid: 0,
+          settlementDue: 0,
+          hasSettlement: false,
+          rentPerDay: 0,
+          daysInMonth: 0,
+          daysCharged: 0,
+          proratedFirstMonth: false,
+          startDate: null,
+          roomElectricityUnitRate: 0,
           payable: false,
         });
         setAmount("");
@@ -82,16 +148,64 @@ export default function PayRent() {
     };
 
     loadBill();
-  }, [agreementId, period]);
+  }, [agreementId, period, exitIdParam]);
+
+  useEffect(() => {
+    if (exitIdParam || billInfo.bill) {
+      if (electricityUnits) setElectricityUnits("");
+      if (electricityUnitRate) setElectricityUnitRate("");
+      return;
+    }
+    const base = billInfo.totalAmount || billInfo.dueRent || 0;
+    const total = base + computedElectricity;
+    setAmount(total > 0 ? String(total) : "");
+  }, [billInfo.bill, billInfo.dueRent, computedElectricity, exitIdParam]);
+
+  useEffect(() => {
+    setElectricityUnits("");
+    setElectricityUnitRate("");
+  }, [agreementId, period, exitIdParam]);
+
+  useEffect(() => {
+    if (!showElectricityInputs) return;
+    if (electricityUnitRate) return;
+    const rate = Number(billInfo.roomElectricityUnitRate || 0);
+    if (rate > 0) {
+      setElectricityUnitRate(String(rate));
+    }
+  }, [billInfo.roomElectricityUnitRate, electricityUnitRate, showElectricityInputs]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(search);
+    const periodParam = params.get("period");
+    if (periodParam && PERIOD_PATTERN.test(periodParam)) {
+      setPeriod((current) => (current === periodParam ? current : periodParam));
+    }
+    const amountParam = params.get("amount");
+    if (amountParam) {
+      setAmount((current) => (current === amountParam ? current : amountParam));
+    }
+  }, [search]);
 
   const submit = async () => {
-    if (!billInfo.payable || Number(billInfo.totalAmount || 0) <= 0) {
+    if (!canPay || Number(amount) <= 0) {
       return showToast("error", t("Nothing due for this period"));
     }
     const nextErrors = {};
     if (!period) nextErrors.period = t("Period is required");
     if (period && !/^\d{4}-(0[1-9]|1[0-2])$/.test(period)) nextErrors.period = t("Period must be YYYY-MM");
     if (!amount || Number(amount) <= 0) nextErrors.amount = t("Valid amount required");
+    const wantsElectricity = showElectricityInputs && (electricityUnits || electricityUnitRate);
+    if (wantsElectricity) {
+      const unitsNum = Number(electricityUnits);
+      const rateNum = Number(electricityUnitRate);
+      if (!Number.isFinite(unitsNum) || unitsNum <= 0) {
+        nextErrors.electricityUnits = t("Valid units required");
+      }
+      if (!Number.isFinite(rateNum) || rateNum <= 0) {
+        nextErrors.electricityUnitRate = t("Valid unit rate required");
+      }
+    }
     if (isBank) {
       if (!cardName.trim()) nextErrors.cardName = t("Card holder name is required");
       const numDigits = String(cardNumber || "").replace(/[^0-9]/g, "");
@@ -103,7 +217,7 @@ export default function PayRent() {
     if (Object.keys(nextErrors).length) {
       return showToast("error", t("Please fix the highlighted fields"));
     }
-    if (!billInfo.payable || Number(amount) <= 0) {
+    if (!canPay || Number(amount) <= 0) {
       return showToast("error", t("Nothing due for this period"));
     }
 
@@ -114,6 +228,9 @@ export default function PayRent() {
           agreementId,
           period,
           amount: Number(amount),
+          exitId: exitIdParam || undefined,
+          electricityUnits: showElectricityInputs && electricityUnits ? Number(electricityUnits) : undefined,
+          electricityUnitRate: showElectricityInputs && electricityUnitRate ? Number(electricityUnitRate) : undefined,
         });
         submitEsewaForm(res.data.epayUrl, res.data.form);
         return;
@@ -123,6 +240,9 @@ export default function PayRent() {
           agreementId,
           period,
           amountNpr: Number(amount),
+          exitId: exitIdParam || undefined,
+          electricityUnits: showElectricityInputs && electricityUnits ? Number(electricityUnits) : undefined,
+          electricityUnitRate: showElectricityInputs && electricityUnitRate ? Number(electricityUnitRate) : undefined,
         });
         if (res.data?.payment_url) {
           window.location.href = res.data.payment_url;
@@ -137,6 +257,9 @@ export default function PayRent() {
         amount: Number(amount),
         method,
         note,
+        exitId: exitIdParam || undefined,
+        electricityUnits: showElectricityInputs && electricityUnits ? Number(electricityUnits) : undefined,
+        electricityUnitRate: showElectricityInputs && electricityUnitRate ? Number(electricityUnitRate) : undefined,
         cardName: isBank ? cardName.trim() : "",
         cardExpiry: isBank ? formattedExpiry : "",
       });
@@ -197,13 +320,84 @@ export default function PayRent() {
             <div className="muted" style={{ fontSize: 13 }}>{t("Rent")}</div>
             <div style={{ fontWeight: 900 }}>NPR {billInfo.dueRent || 0}</div>
           </div>
+          {billInfo.rentPerDay > 0 && billInfo.daysCharged > 0 ? (
+            <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
+              {t("Per-day rent")}: NPR {billInfo.rentPerDay} / {t("day")} •{" "}
+              {t("Days charged")}: {billInfo.daysCharged} / {billInfo.daysInMonth} •{" "}
+              {t("Calculated rent")}: NPR {billInfo.dueRent || 0}
+              {billInfo.proratedFirstMonth ? ` (${t("Prorated first month")})` : ""}
+            </div>
+          ) : null}
+          {exitIdParam && billInfo.expectedRent > 0 ? (
+            <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
+              {t("Exit total rent")}: NPR {billInfo.expectedRent} •{" "}
+              {t("Paid rent")}: NPR {billInfo.paidRent} •{" "}
+              {t("Unpaid")}: NPR {billInfo.dueRent || 0}
+            </div>
+          ) : null}
+          {exitIdParam && billInfo.hasSettlement ? (
+            <div className="muted" style={{ fontSize: 12, marginTop: 6, lineHeight: 1.6 }}>
+              {t("Settlement due")}: NPR <b style={{ color: "#111827" }}>{billInfo.settlementDue || 0}</b>
+              {billInfo.damagesCost > 0 ? (
+                <>
+                  {" • "}{t("Damages")}: NPR {billInfo.damagesCost}
+                </>
+              ) : null}
+              {billInfo.otherDeductions > 0 ? (
+                <>
+                  {" • "}{t("Others")}: NPR {billInfo.otherDeductions}
+                </>
+              ) : null}
+              {billInfo.depositPaid > 0 ? (
+                <>
+                  {" • "}{t("Deposit")}: NPR {billInfo.depositPaid}
+                </>
+              ) : null}
+            </div>
+          ) : null}
           <div className="row" style={{ justifyContent: "space-between", flexWrap: "wrap", marginTop: 6 }}>
             <div className="muted" style={{ fontSize: 13 }}>{t("Electricity")}</div>
-            <div style={{ fontWeight: 900 }}>NPR {billInfo.dueElectricity || 0}</div>
+            <div style={{ fontWeight: 900 }}>NPR {displayElectricity || 0}</div>
           </div>
+          {showElectricityInputs ? (
+            <>
+              <div className="spacer" />
+              <div className="row" style={{ gap: 12, flexWrap: "wrap" }}>
+                <div style={{ flex: 1, minWidth: 140 }}>
+                  <label className="muted" style={{ fontSize: 12 }}>{t("Units used")}</label>
+                  <input
+                    className={`input ${errors.electricityUnits ? "inputErr" : ""}`}
+                    value={electricityUnits}
+                    onChange={(e) => {
+                      setElectricityUnits(e.target.value);
+                      if (errors.electricityUnits) setErrors((p) => ({ ...p, electricityUnits: "" }));
+                    }}
+                    placeholder={t("e.g. 45")}
+                  />
+                  {errors.electricityUnits ? <div className="fieldErr">{errors.electricityUnits}</div> : null}
+                </div>
+                <div style={{ flex: 1, minWidth: 140 }}>
+                  <label className="muted" style={{ fontSize: 12 }}>{t("Unit Rate (NPR)")}</label>
+                  <input
+                    className={`input ${errors.electricityUnitRate ? "inputErr" : ""}`}
+                    value={electricityUnitRate}
+                    onChange={(e) => {
+                      setElectricityUnitRate(e.target.value);
+                      if (errors.electricityUnitRate) setErrors((p) => ({ ...p, electricityUnitRate: "" }));
+                    }}
+                    placeholder={t("e.g. 12")}
+                  />
+                  {errors.electricityUnitRate ? <div className="fieldErr">{errors.electricityUnitRate}</div> : null}
+                </div>
+              </div>
+              <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
+                {t("Calculated electricity")}: NPR {computedElectricity || 0}
+              </div>
+            </>
+          ) : null}
           <div className="row" style={{ justifyContent: "space-between", flexWrap: "wrap", marginTop: 6 }}>
             <div className="muted" style={{ fontSize: 13 }}>{t("Total")}</div>
-            <div style={{ fontWeight: 900, fontSize: 18 }}>NPR {billInfo.totalAmount || 0}</div>
+            <div style={{ fontWeight: 900, fontSize: 18 }}>NPR {displayTotal || 0}</div>
           </div>
           <div className="row" style={{ flexWrap: "wrap", marginTop: 8 }}>
             {billInfo.rentPaid ? (
@@ -213,7 +407,7 @@ export default function PayRent() {
             ) : (
               <span className="pill pillBad">{t("Rent due")}</span>
             )}
-            {billInfo.bill ? (
+            {billInfo.bill || computedElectricity > 0 ? (
               <span className="pill pillInfo">{t("Electricity due")}</span>
             ) : (
               <span className="pill pillMuted">{t("No electricity bill")}</span>
@@ -226,8 +420,8 @@ export default function PayRent() {
           ) : (
             <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>
               {billInfo.rentPaid
-                ? t("Rent already paid. Electricity bill not added yet for this period.")
-                : t("Electricity bill not added yet for this period.")}
+                ? t("Rent already paid. Electricity not added for this period.")
+                : t("Enter electricity units to include with this payment.")}
             </div>
           )}
           {billInfo.rentPending ? (
@@ -379,9 +573,8 @@ export default function PayRent() {
 
         <div className="spacer" />
 
-        <div className="row" style={{ justifyContent: "space-between" }}>
-          <button className="btn btnOutline" onClick={() => navigate(-1)}>{t("Back")}</button>
-          <button className="btn" onClick={submit} disabled={loading || !billInfo.payable || Number(amount) <= 0}>
+        <div className="row" style={{ justifyContent: "flex-end" }}>
+          <button className="btn" onClick={submit} disabled={loading || !canPay || Number(amount) <= 0}>
             {loading
               ? t("Submitting...")
               : (method === "esewa"

@@ -9,6 +9,7 @@ export function NotificationProvider({ children }) {
   const [items, setItems] = useState([]);
   const [unread, setUnread] = useState(0);
   const [connected, setConnected] = useState(false);
+  const [visitEvent, setVisitEvent] = useState(null);
 
   const token = localStorage.getItem("token");
 
@@ -52,6 +53,9 @@ export function NotificationProvider({ children }) {
       setItems((prev) => [n, ...prev].slice(0, 50));
       setUnread((u) => u + 1);
     });
+    socket.on("visit:updated", (evt) => {
+      setVisitEvent(evt || null);
+    });
     return () => socket.disconnect();
   }, [token]);
 
@@ -84,9 +88,18 @@ export function NotificationProvider({ children }) {
     }
   };
 
+  const deleteAllRead = async () => {
+    setItems((prev) => prev.filter((n) => !n.read));
+    try {
+      await http.delete("/api/notifications/read-all");
+    } catch {
+      load();
+    }
+  };
+
   const value = useMemo(
-    () => ({ items, unread, connected, load, markRead, markAllRead, deleteNotification }),
-    [items, unread, connected]
+    () => ({ items, unread, connected, load, markRead, markAllRead, deleteNotification, deleteAllRead, visitEvent }),
+    [items, unread, connected, visitEvent]
   );
 
   return <NotificationContext.Provider value={value}>{children}</NotificationContext.Provider>;

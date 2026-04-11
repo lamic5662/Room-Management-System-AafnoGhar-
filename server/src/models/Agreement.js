@@ -20,6 +20,7 @@ const agreementSchema = new mongoose.Schema(
         ownerSignatureUrl: { type: String, default: "" },
         tenantSignatureUrl: { type: String, default: "" },
         rentReminderPeriod: { type: String, default: "" },
+        rentReminderDay: { type: Number, default: 1, min: 1, max: 31 },
         carryOverCredit: { type: Number, default: 0 },
         carryOverCreditPeriod: { type: String, default: "" },
         firstMonthProrated: { type: Boolean, default: false },

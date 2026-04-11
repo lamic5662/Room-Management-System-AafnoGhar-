@@ -2,7 +2,10 @@ import mongoose from "mongoose";
 import Offer from "../models/Offer.js";
 import Room from "../models/Room.js";
 import Agreement from "../models/Agreement.js";
+import Visit from "../models/Visit.js";
+import { emitVisitDeletesByRoom } from "../services/visitRealtime.service.js";
 import { notifyUser } from "../services/notify.service.js";
+import { recordOwnerResponse } from "../services/responseStats.service.js";
 
 const createOffer = async (req, res) => {
   try {
@@ -60,6 +63,7 @@ const createOffer = async (req, res) => {
       owner: ownerId,
       offeredRent: rentNum,
       message,
+      lastTenantActionAt: new Date(),
     });
 
     notifyUser({
@@ -122,6 +126,7 @@ const ownerAcceptOffer = async (req, res) => {
       return res.status(400).json({ message: "Offer already processed" });
     }
 
+    const responseFrom = offer.status === "pending" ? offer.lastTenantActionAt || offer.createdAt : null;
     const prevStatus = offer.status;
     offer.status = "accepted";
     // If owner is accepting their own counter, use ownerCounterRent.
@@ -141,6 +146,12 @@ const ownerAcceptOffer = async (req, res) => {
       type: "offer",
       data: { offerId: offer._id, roomId: offer.room, url: "/tenant/offers" },
     });
+
+    if (responseFrom) {
+      recordOwnerResponse({ ownerId: offer.owner, createdAt: responseFrom }).catch((err) => {
+        console.log("Record owner response error:", err.message);
+      });
+    }
 
     res.json({ message: "Offer accepted", offer });
   } catch {
@@ -163,6 +174,7 @@ const ownerRejectOffer = async (req, res) => {
       return res.status(400).json({ message: "Offer already processed" });
     }
 
+    const responseFrom = offer.status === "pending" ? offer.lastTenantActionAt || offer.createdAt : null;
     offer.status = "rejected";
     offer.ownerReply = ownerReply;
     await offer.save();
@@ -174,6 +186,12 @@ const ownerRejectOffer = async (req, res) => {
       type: "offer",
       data: { offerId: offer._id, roomId: offer.room, url: "/tenant/offers" },
     });
+
+    if (responseFrom) {
+      recordOwnerResponse({ ownerId: offer.owner, createdAt: responseFrom }).catch((err) => {
+        console.log("Record owner response error:", err.message);
+      });
+    }
 
     res.json({ message: "Offer rejected", offer });
   } catch {
@@ -203,6 +221,7 @@ const ownerCounterOffer = async (req, res) => {
       return res.status(400).json({ message: "Offer already processed" });
     }
 
+    const responseFrom = offer.status === "pending" ? offer.lastTenantActionAt || offer.createdAt : null;
     offer.status = "countered";
     offer.ownerCounterRent = counterNum;
     offer.acceptedRent = 0;
@@ -216,6 +235,12 @@ const ownerCounterOffer = async (req, res) => {
       type: "offer",
       data: { offerId: offer._id, roomId: offer.room, url: "/tenant/offers" },
     });
+
+    if (responseFrom) {
+      recordOwnerResponse({ ownerId: offer.owner, createdAt: responseFrom }).catch((err) => {
+        console.log("Record owner response error:", err.message);
+      });
+    }
 
     res.json({ message: "Counter offer sent", offer });
   } catch {
@@ -256,6 +281,7 @@ const tenantCounterOffer = async (req, res) => {
     offer.offeredRent = rentNum;
     offer.message = message;
     offer.ownerCounterRent = 0;
+    offer.lastTenantActionAt = new Date();
     offer.acceptedRent = 0;
     await offer.save();
 
@@ -391,6 +417,9 @@ const createAgreementFromOffer = async (req, res) => {
 
     offer.agreement = agreement._id;
     await offer.save();
+
+    await emitVisitDeletesByRoom(room._id);
+    await Visit.deleteMany({ room: room._id });
 
     notifyUser({
       userId: offer.tenant,

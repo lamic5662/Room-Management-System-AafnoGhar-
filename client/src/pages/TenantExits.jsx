@@ -1,15 +1,24 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import http from "../api/http";
 import Spinner from "../components/Spinner";
 import Modal from "../components/Modal";
 import { useToast } from "../context/ToastContext";
 import { useI18n } from "../context/I18nContext";
 
+const formatExitPeriod = (dateStr) => {
+  if (!dateStr) return "";
+  const d = new Date(dateStr);
+  if (Number.isNaN(d.getTime())) return "";
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+};
+
 export default function TenantExits() {
   const { showToast } = useToast();
   const { t } = useI18n();
   const [loading, setLoading] = useState(true);
   const [items, setItems] = useState([]);
+  const [downloading, setDownloading] = useState("");
 
   const [open, setOpen] = useState(false);
   const [agreements, setAgreements] = useState([]);
@@ -18,6 +27,12 @@ export default function TenantExits() {
   const [reason, setReason] = useState("I am moving to another place.");
   const [sending, setSending] = useState(false);
   const [errors, setErrors] = useState({});
+
+  const statusLabel = (s) => {
+    const key = String(s || "").toLowerCase();
+    if (key === "settlement_pending") return t("SETTLEMENT PENDING");
+    return String(s || "").toUpperCase();
+  };
 
   const load = async () => {
     try {
@@ -43,6 +58,27 @@ export default function TenantExits() {
   };
 
   useEffect(() => { load(); loadAgreements(); }, []);
+
+  const downloadSummary = async (exitId) => {
+    if (!exitId) return;
+    try {
+      setDownloading(exitId);
+      const res = await http.get(`/api/exits/${exitId}/summary-pdf`, { responseType: "blob" });
+      const blob = new Blob([res.data], { type: "application/pdf" });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `exit-summary-${exitId}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
+    } catch (e) {
+      showToast("error", e?.response?.data?.message || t("Summary download failed"));
+    } finally {
+      setDownloading("");
+    }
+  };
 
   const requestExit = async () => {
     const nextErrors = {};
@@ -88,59 +124,130 @@ export default function TenantExits() {
         <div className="card cardPad">{t("No exit requests yet.")}</div>
       ) : (
         <div className="gridCards">
-          {items.map((x) => (
-            <div className="card cardPad" key={x._id}>
-              <div className="row" style={{ justifyContent: "space-between", alignItems: "flex-start" }}>
-                <div>
-                  <div style={{ fontWeight: 1000 }}>{x.room?.title}</div>
-                  <div className="muted" style={{ marginTop: 4 }}>{x.room?.location}</div>
-                </div>
-                <span className="badge">{(x.status || "").toUpperCase()}</span>
-              </div>
+          {items.map((x) => {
+            const status = (x.status || "").toLowerCase();
+            const hasSettlement = ["settlement_pending", "settled"].includes(status) || x.settlementAt;
+            const dueAmount = Number(
+              (hasSettlement ? x.settlementDue : (x.exitDue ?? x.computedUnpaidRent)) ?? 0
+            ) || 0;
+            const duePeriod = x.computedPeriod || formatExitPeriod(x.moveOutDate);
+            const agreementId = x.agreement?._id;
+            const dueVisible = dueAmount > 0 && agreementId && duePeriod && (status === "approved" || status === "settlement_pending" || status === "settled") && !x.settlementPaid;
+            const canDownload = !!x?._id;
+            const canRate = status === "settled" && !!x.room?._id;
+            const summaryUnpaid = Math.ceil(
+              hasSettlement
+                ? Number(x.unpaidRent || 0)
+                : Number(x.computedUnpaidRent ?? x.unpaidRent ?? 0)
+            );
+            const refundable = Math.ceil(Number(x.refundableAmount || 0));
+            const deposit = Math.ceil(Number(x.depositPaid ?? x.securityDeposit ?? 0));
+            const summaryValue = hasSettlement ? refundable : summaryUnpaid;
+            const showSummary = deposit > 0 || summaryValue > 0;
+            const query = new URLSearchParams({
+              period: duePeriod,
+              amount: dueAmount.toFixed(2),
+              exitId: x._id,
+            }).toString();
+            const payLink = `/tenant/pay/${agreementId}?${query}`;
 
-              <div className="spacer" />
-              <div className="muted" style={{ fontSize: 13 }}>
-                {t("Move-out")}: <b style={{ color: "#111827" }}>{new Date(x.moveOutDate).toLocaleDateString()}</b>
-              </div>
-              {x.reason ? (
-                <div className="muted" style={{ marginTop: 6, fontSize: 13, lineHeight: 1.6 }}>
-                  <b style={{ color: "#111827" }}>{t("Reason")}:</b> {x.reason}
-                </div>
-              ) : null}
-
-              {x.status === "settled" ? (
-                <>
-                  <div className="spacer" />
-                  <div className="card cardPad" style={{ boxShadow: "none" }}>
-                    <div style={{ fontWeight: 1000 }}>{t("Settlement")}</div>
-                    <div className="muted" style={{ marginTop: 8, fontSize: 13, lineHeight: 1.7 }}>
-                      {t("Deposit")}: NPR <b style={{ color: "#111827" }}>{x.securityDeposit}</b><br/>
-                      {t("Unpaid")}: NPR <b style={{ color: "#111827" }}>{x.unpaidRent}</b><br/>
-                      {t("Damages")}: NPR <b style={{ color: "#111827" }}>{x.damagesCost}</b><br/>
-                      {t("Others")}: NPR <b style={{ color: "#111827" }}>{x.otherDeductions}</b><br/>
-                      {t("Refund")}: NPR <b style={{ color: "#111827" }}>{x.refundableAmount}</b>
-                    </div>
-                    {x.ownerNote ? (
-                      <div className="muted" style={{ marginTop: 10, fontSize: 13 }}>
-                        <b style={{ color: "#111827" }}>{t("Owner note")}:</b> {x.ownerNote}
-                      </div>
-                    ) : null}
+            return (
+              <div className="card cardPad" key={x._id}>
+                <div className="row" style={{ justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 8 }}>
+                  <div>
+                    <div style={{ fontWeight: 1000 }}>{x.room?.title}</div>
+                    <div className="muted" style={{ marginTop: 4 }}>{x.room?.location}</div>
                   </div>
-                </>
-              ) : null}
-
-              {x.status === "rejected" && x.ownerNote ? (
-                <div className="muted" style={{ marginTop: 10, fontSize: 13 }}>
-                  <b style={{ color: "#111827" }}>{t("Owner note")}:</b> {x.ownerNote}
+                  <div className="row" style={{ gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                    <span className="badge">{statusLabel(x.status)}</span>
+                  </div>
                 </div>
-              ) : null}
 
-              <div className="spacer" />
-              <div className="muted" style={{ fontSize: 13 }}>
-                {t("Created")}: {new Date(x.createdAt).toLocaleString()}
+                <div className="spacer" />
+                <div className="muted" style={{ fontSize: 13 }}>
+                  {t("Move-out")}: <b style={{ color: "#111827" }}>{new Date(x.moveOutDate).toLocaleDateString()}</b>
+                </div>
+                {showSummary && (
+                  <div className="muted" style={{ marginTop: 6, fontSize: 12 }}>
+                    {t("Deposit")}: NPR {deposit} • {hasSettlement ? t("Refund") : t("Unpaid")}: NPR {summaryValue}
+                  </div>
+                )}
+                {x.reason ? (
+                  <div className="muted" style={{ marginTop: 6, fontSize: 13, lineHeight: 1.6 }}>
+                    <b style={{ color: "#111827" }}>{t("Reason")}:</b> {x.reason}
+                  </div>
+                ) : null}
+
+                {(x.status === "settled" || x.status === "settlement_pending") && x.settlementAt && x.hasPaidRent && x.isEarlyExit && !x.settlementPaid ? (
+                  <>
+                    <div className="spacer" />
+                    <div className="card cardPad" style={{ boxShadow: "none" }}>
+                      <div style={{ fontWeight: 1000 }}>{t("Settlement")}</div>
+                      <div className="muted" style={{ marginTop: 8, fontSize: 13, lineHeight: 1.7 }}>
+                        {t("Deposit")}: NPR <b style={{ color: "#111827" }}>{x.depositPaid ?? x.securityDeposit}</b><br/>
+                        {t("Unpaid")}: NPR <b style={{ color: "#111827" }}>{x.unpaidRent}</b><br/>
+                        {t("Damages")}: NPR <b style={{ color: "#111827" }}>{x.damagesCost}</b><br/>
+                        {t("Others")}: NPR <b style={{ color: "#111827" }}>{x.otherDeductions}</b><br/>
+                        {Number(x.electricityAmount || 0) > 0 ? (
+                          <>
+                            {t("Electricity")}: NPR <b style={{ color: "#111827" }}>{x.electricityAmount}</b><br/>
+                          </>
+                        ) : null}
+                        {t("Refund")}: NPR <b style={{ color: "#111827" }}>{x.refundableAmount}</b>
+                      </div>
+                      {x.ownerNote ? (
+                        <div className="muted" style={{ marginTop: 10, fontSize: 13 }}>
+                          <b style={{ color: "#111827" }}>{t("Owner note")}:</b> {x.ownerNote}
+                        </div>
+                      ) : null}
+                    </div>
+                  </>
+                ) : null}
+
+                {x.status === "rejected" && x.ownerNote ? (
+                  <div className="muted" style={{ marginTop: 10, fontSize: 13 }}>
+                    <b style={{ color: "#111827" }}>{t("Owner note")}:</b> {x.ownerNote}
+                  </div>
+                ) : null}
+
+                {dueVisible && (
+                  <>
+                    <div className="spacer" />
+                    <Link className="btn btnOutline" to={payLink}>
+                      {t("Pay unpaid rent")}
+                    </Link>
+                  </>
+                )}
+
+                {canDownload && (
+                  <>
+                    <div className="spacer" />
+                    <button
+                      className="btn btnOutline"
+                      onClick={() => downloadSummary(x._id)}
+                      disabled={downloading === x._id}
+                    >
+                      {downloading === x._id ? t("Downloading...") : t("Download Summary")}
+                    </button>
+                  </>
+                )}
+
+                {canRate && (
+                  <>
+                    <div className="spacer" />
+                    <Link className="btn" to={`/rooms/${x.room._id}#ratings`}>
+                      {t("Rate room")}
+                    </Link>
+                  </>
+                )}
+
+                <div className="spacer" />
+                <div className="muted" style={{ fontSize: 13 }}>
+                  {t("Created")}: {new Date(x.createdAt).toLocaleString()}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
@@ -173,6 +280,7 @@ export default function TenantExits() {
             setMoveOutDate(e.target.value);
             if (errors.moveOutDate) setErrors((p) => ({ ...p, moveOutDate: "" }));
           }}
+          min={new Date().toISOString().slice(0, 10)}
         />
         {errors.moveOutDate ? <div className="fieldErr">{errors.moveOutDate}</div> : null}
 

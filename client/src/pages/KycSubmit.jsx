@@ -1,11 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import http from "../api/http";
 import { useToast } from "../context/ToastContext";
+import { useI18n } from "../context/I18nContext";
 import KycDocCard from "../components/KycDocCard";
 import NepaliDateInput from "../components/NepaliDateInput";
+import { getPhotoUrl } from "../utils/photo";
+import KycHistory from "../components/KycHistory";
 
 export default function KycSubmit() {
   const user = useMemo(() => JSON.parse(localStorage.getItem("user") || "null"), []);
+  const [previewSrc, setPreviewSrc] = useState("");
   const token = useMemo(() => localStorage.getItem("token"), []);
 
   const [loading, setLoading] = useState(true);
@@ -20,10 +24,18 @@ export default function KycSubmit() {
 
   const [sending, setSending] = useState(false);
   const [errors, setErrors] = useState({});
+  const [snapshot, setSnapshot] = useState({
+    docType: "",
+    fields: {},
+    hasFront: false,
+    hasBack: false,
+  });
 
   const { showToast } = useToast();
+  const { t } = useI18n();
 
   const isTenant = user?.role === "tenant";
+  const hasSubmission = !!kyc?.status && kyc.status !== "not_submitted";
 
   const load = async () => {
     try {
@@ -49,15 +61,43 @@ export default function KycSubmit() {
       setDocType(kyc.docType);
       setFields(kyc.fields && Object.keys(kyc.fields).length ? kyc.fields : defaultFields(kyc.docType));
     }
-  }, [kyc?.docType]);
+    setSnapshot({
+      docType: kyc?.docType || "",
+      fields: kyc?.fields || {},
+      hasFront: Boolean(kyc?.docFrontUrl),
+      hasBack: Boolean(kyc?.docBackUrl),
+    });
+  }, [kyc]);
+
+  const fieldsEqual = (a = {}, b = {}) => {
+    const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
+    for (const key of keys) {
+      const va = String(a[key] ?? "").trim();
+      const vb = String(b[key] ?? "").trim();
+      if (va !== vb) return false;
+    }
+    return true;
+  };
+
+  const shouldSubmitUpdate = () => {
+    if (!hasSubmission) return true;
+    if (docType !== snapshot.docType) return true;
+    if (!fieldsEqual(fields, snapshot.fields)) return true;
+    if (front || back) return true;
+    return false;
+  };
 
   const submit = async () => {
     const nextErrors = {};
     if (!docType) nextErrors.docType = "Document type is required";
-    if (!front) nextErrors.front = "Front image is required";
+    const frontRequired = !kyc?.docFrontUrl;
+    if (!front && frontRequired) nextErrors.front = "Front image is required";
     setErrors(nextErrors);
     if (Object.keys(nextErrors).length) {
       return showToast("error", "Please fix the highlighted fields");
+    }
+    if (!shouldSubmitUpdate()) {
+      return showToast("info", t("No changes detected"));
     }
     setSending(true);
 
@@ -65,21 +105,26 @@ export default function KycSubmit() {
       const fd = new FormData();
       fd.append("docType", docType);
       fd.append("fields", JSON.stringify(fields));
-      fd.append("front", front);
+      if (front) fd.append("front", front);
       if (back) fd.append("back", back);
 
-      await http.post("/api/kyc/submit", fd, {
-        headers: { "Content-Type": "multipart/form-data" },
-      });
+      const endpoint = hasSubmission ? "/api/kyc/update" : "/api/kyc/submit";
+      const res = await (hasSubmission
+        ? http.put(endpoint, fd, { headers: { "Content-Type": "multipart/form-data" } })
+        : http.post(endpoint, fd, { headers: { "Content-Type": "multipart/form-data" } }));
 
-      showToast("success", "KYC submitted ✅ (pending review)");
+      showToast(
+        "success",
+        hasSubmission ? "KYC updated ✅ (pending review)" : "KYC submitted ✅ (pending review)"
+      );
       setFront(null);
       setBack(null);
       if (frontRef.current) frontRef.current.value = "";
       if (backRef.current) backRef.current.value = "";
-      setFields(defaultFields(docType));
       setErrors({});
-      const nextUser = { ...(user || {}), kyc: { ...(kyc || {}), status: "pending" } };
+      const nextKyc = res.data.kyc ?? res.data.user?.kyc ?? kyc;
+      setKyc(nextKyc);
+      const nextUser = { ...(user || {}), kyc: { ...(nextKyc || {}), status: nextKyc?.status || "pending" } };
       localStorage.setItem("user", JSON.stringify(nextUser));
       window.dispatchEvent(new Event("auth:updated"));
       await load();
@@ -124,6 +169,33 @@ export default function KycSubmit() {
           </div>
         ) : null}
       </div>
+
+      {(kyc?.docFrontUrl || kyc?.docBackUrl || kyc?.selfieUrl) && (
+        <div className="card cardPad">
+          <div style={{ fontWeight: 900 }}>{kyc?.status === "verified" ? "Verified Docs" : "Uploaded Docs"}</div>
+          <div className="muted" style={{ marginTop: 6 }}>
+            You can preview previously uploaded documents.
+          </div>
+          <div className="spacer" />
+          <div className="row" style={{ flexWrap: "wrap" }}>
+            {kyc?.docFrontUrl && (
+              <button className="pill" type="button" onClick={() => setPreviewSrc(getPhotoUrl(kyc.docFrontUrl))}>
+                Front
+              </button>
+            )}
+            {kyc?.docBackUrl && (
+              <button className="pill" type="button" onClick={() => setPreviewSrc(getPhotoUrl(kyc.docBackUrl))}>
+                Back
+              </button>
+            )}
+            {kyc?.selfieUrl && (
+              <button className="pill" type="button" onClick={() => setPreviewSrc(getPhotoUrl(kyc.selfieUrl))}>
+                Selfie
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
       <div className="spacer" />
 
@@ -218,10 +290,10 @@ export default function KycSubmit() {
             onChange={(e) => setBack(e.target.files?.[0] || null)}
           />
 
-          <div className="spacer" />
+        <div className="spacer" />
 
           <button className="btn" onClick={submit} disabled={sending}>
-            {sending ? "Submitting..." : "Submit KYC"}
+            {sending ? "Submitting..." : hasSubmission ? "Update KYC" : "Submit KYC"}
           </button>
 
           <div className="spacer" />
@@ -258,10 +330,33 @@ export default function KycSubmit() {
               if (backRef.current) backRef.current.value = "";
             }}
           />
-        </div>
       </div>
     </div>
-  );
+
+      <KycHistory history={kyc?.history} />
+
+      {previewSrc ? (
+        <div className="modalBg" onMouseDown={() => setPreviewSrc("")}>
+          <div className="modal" onMouseDown={(e) => e.stopPropagation()} style={{ maxWidth: 900 }}>
+            <div className="row" style={{ justifyContent: "space-between" }}>
+              <div style={{ fontWeight: 900 }}>Document Preview</div>
+              <button className="pill" onClick={() => setPreviewSrc("")} style={{ padding: "4px 10px" }}>
+                ✕
+              </button>
+            </div>
+            <div className="spacer" />
+            <div className="card" style={{ borderRadius: 16, overflow: "hidden", boxShadow: "none", background: "#f3f4f6" }}>
+              <img
+                src={previewSrc}
+                alt="KYC preview"
+                style={{ width: "100%", maxHeight: "70vh", objectFit: "contain", display: "block" }}
+              />
+            </div>
+          </div>
+        </div>
+      ) : null}
+  </div>
+);
 }
 
 function docFields(type) {

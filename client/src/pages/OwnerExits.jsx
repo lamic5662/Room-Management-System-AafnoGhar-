@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import http from "../api/http";
 import Spinner from "../components/Spinner";
 import Modal from "../components/Modal";
@@ -11,6 +11,7 @@ export default function OwnerExits() {
   const [loading, setLoading] = useState(true);
   const [items, setItems] = useState([]);
   const [busyId, setBusyId] = useState("");
+  const [downloading, setDownloading] = useState("");
 
   const [openReject, setOpenReject] = useState(false);
   const [selected, setSelected] = useState(null);
@@ -22,10 +23,30 @@ export default function OwnerExits() {
   const [unpaidRent, setUnpaidRent] = useState("0");
   const [damagesCost, setDamagesCost] = useState("0");
   const [otherDeductions, setOtherDeductions] = useState("0");
+  const [electricityUnits, setElectricityUnits] = useState("0");
+  const [electricityUnitRate, setElectricityUnitRate] = useState("0");
+  const [electricityAmount, setElectricityAmount] = useState("0");
   const [ownerNote, setOwnerNote] = useState("Settlement completed.");
   const [sendingSettle, setSendingSettle] = useState(false);
   const [settleErrors, setSettleErrors] = useState({});
   const [purgeBusy, setPurgeBusy] = useState("");
+
+  useEffect(() => {
+    const units = Number(electricityUnits);
+    const rate = Number(electricityUnitRate);
+    if (!Number.isFinite(units) || !Number.isFinite(rate)) {
+      setElectricityAmount("0");
+      return;
+    }
+    const total = Math.max(0, units * rate);
+    setElectricityAmount(String(Math.ceil(total)));
+  }, [electricityUnits, electricityUnitRate]);
+
+  const statusLabel = (s) => {
+    const key = String(s || "").toLowerCase();
+    if (key === "settlement_pending") return t("SETTLEMENT PENDING");
+    return String(s || "").toUpperCase();
+  };
 
   const load = async () => {
     try {
@@ -41,12 +62,34 @@ export default function OwnerExits() {
 
   useEffect(() => { load(); }, []);
 
-  const approve = async (id) => {
+  const downloadSummary = async (exitId) => {
+    if (!exitId) return;
     try {
-      setBusyId(id);
-      await http.patch(`/api/exits/${id}/approve`);
+      setDownloading(exitId);
+      const res = await http.get(`/api/exits/${exitId}/summary-pdf`, { responseType: "blob" });
+      const blob = new Blob([res.data], { type: "application/pdf" });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `exit-summary-${exitId}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
+    } catch (e) {
+      showToast("error", e?.response?.data?.message || t("Summary download failed"));
+    } finally {
+      setDownloading("");
+    }
+  };
+
+  const approve = async (x) => {
+    try {
+      setBusyId(x._id);
+      await http.patch(`/api/exits/${x._id}/approve`);
       showToast("success", t("Exit approved ✅"));
-      load();
+      await load();
+      openSettleModal(x);
     } catch (e) {
       showToast("error", e?.response?.data?.message || t("Approve failed"));
     } finally {
@@ -84,7 +127,11 @@ export default function OwnerExits() {
 
   const openSettleModal = (x) => {
     setSelected(x);
-    setUnpaidRent("0");
+    const baseUnpaid = Number(x?.computedUnpaidRent ?? x?.unpaidRent ?? 0) || 0;
+    setUnpaidRent(String(baseUnpaid));
+    setElectricityUnits(String(x?.electricityUnits ?? 0));
+    setElectricityUnitRate(String(x?.electricityUnitRate ?? 0));
+    setElectricityAmount(String(x?.electricityAmount ?? 0));
     setDamagesCost("0");
     setOtherDeductions("0");
     setOwnerNote(t("Settlement completed."));
@@ -97,9 +144,14 @@ export default function OwnerExits() {
     const unpaid = Number(unpaidRent);
     const damages = Number(damagesCost);
     const others = Number(otherDeductions);
+    const elecUnits = Number(electricityUnits);
+    const elecRate = Number(electricityUnitRate);
+    const elecAmt = Number(electricityAmount);
     if (!Number.isFinite(unpaid) || unpaid < 0) nextErrors.unpaidRent = t("Unpaid rent must be 0 or more");
     if (!Number.isFinite(damages) || damages < 0) nextErrors.damagesCost = t("Damages must be 0 or more");
     if (!Number.isFinite(others) || others < 0) nextErrors.otherDeductions = t("Other deductions must be 0 or more");
+    if (!Number.isFinite(elecUnits) || elecUnits < 0) nextErrors.electricityUnits = t("Units must be 0 or more");
+    if (!Number.isFinite(elecRate) || elecRate < 0) nextErrors.electricityUnitRate = t("Unit rate must be 0 or more");
     if (!ownerNote.trim()) nextErrors.ownerNote = t("Owner note is required");
     setSettleErrors(nextErrors);
     if (Object.keys(nextErrors).length) {
@@ -111,9 +163,12 @@ export default function OwnerExits() {
         unpaidRent: Number(unpaidRent || 0),
         damagesCost: Number(damagesCost || 0),
         otherDeductions: Number(otherDeductions || 0),
+        electricityUnits: Number(electricityUnits || 0),
+        electricityUnitRate: Number(electricityUnitRate || 0),
+        electricityAmount: Number(electricityAmount || 0),
         ownerNote,
       });
-      showToast("success", t("Exit settled ✅ Agreement ended"));
+      showToast("success", t("Settlement sent ✅"));
       setOpenSettle(false);
       setSettleErrors({});
       load();
@@ -159,9 +214,21 @@ export default function OwnerExits() {
         <div className="gridCards">
           {items.map((x) => {
             const isBusy = busyId === x._id;
-            const canApprove = x.status === "requested";
-            const canSettle = x.status === "approved";
-            const canPurge = x.status === "approved" || x.status === "settled";
+            const status = String(x.status || "").toLowerCase();
+            const canApprove = status === "requested";
+            const canSettle = status === "approved";
+            const canPurge = status === "settled" && x.settlementPaid;
+            const canDownload = !!x?._id;
+            const hasSettlement = ["settlement_pending", "settled"].includes(status) || x.settlementAt;
+            const summaryUnpaid = Math.ceil(
+              hasSettlement
+                ? Number(x.unpaidRent || 0)
+                : Number(x.computedUnpaidRent ?? x.unpaidRent ?? 0)
+            );
+            const refundable = Math.ceil(Number(x.refundableAmount || 0));
+            const deposit = Math.ceil(Number(x.depositPaid ?? x.securityDeposit ?? 0));
+            const summaryValue = hasSettlement ? refundable : summaryUnpaid;
+            const showSummary = deposit > 0 || summaryValue > 0;
 
             return (
               <div key={x._id} className="card cardPad">
@@ -173,13 +240,27 @@ export default function OwnerExits() {
                       {t("Tenant")}: <b style={{ color: "#111827" }}>{x.tenant?.fullName}</b> • {x.tenant?.phone}
                     </div>
                   </div>
-                  <span className="badge">{(x.status || "").toUpperCase()}</span>
+                  <div className="row" style={{ gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                    <span className="badge">{statusLabel(x.status)}</span>
+                  </div>
                 </div>
 
                 <div className="spacer" />
                 <div className="muted" style={{ fontSize: 13 }}>
                   {t("Move-out")}: <b style={{ color: "#111827" }}>{new Date(x.moveOutDate).toLocaleDateString()}</b>
                 </div>
+                {showSummary && (
+                  <div className="muted" style={{ marginTop: 6, fontSize: 12 }}>
+                    {t("Deposit")}: NPR {deposit} • {hasSettlement ? t("Refund") : t("Unpaid")}: NPR {summaryValue}
+                  </div>
+                )}
+                {x.rentPerDay ? (
+                  <div className="muted" style={{ marginTop: 6, fontSize: 12 }}>
+                    {t("Per-day rent")}: NPR {x.rentPerDay} / {t("day")} •{" "}
+                    {t("Days charged")}: {x.daysCharged} / {x.daysInMonth}{" "}
+                    {x.proratedFirstMonth ? `• ${t("Prorated")}` : ""}
+                  </div>
+                ) : null}
                 {x.reason ? (
                   <div className="muted" style={{ marginTop: 6, fontSize: 13, lineHeight: 1.6 }}>
                     <b style={{ color: "#111827" }}>{t("Reason")}:</b> {x.reason}
@@ -193,7 +274,7 @@ export default function OwnerExits() {
                       <button className="btn btnOutline" disabled={isBusy} onClick={() => openRejectModal(x)}>
                         {t("Reject")}
                       </button>
-                      <button className="btn" disabled={isBusy} onClick={() => approve(x._id)}>
+                      <button className="btn" disabled={isBusy} onClick={() => approve(x)}>
                         {isBusy ? t("Approving...") : t("Approve")}
                       </button>
                     </>
@@ -202,6 +283,16 @@ export default function OwnerExits() {
                   {canSettle && (
                     <button className="btn" onClick={() => openSettleModal(x)}>
                       {t("Settle")}
+                    </button>
+                  )}
+
+                  {canDownload && (
+                    <button
+                      className="btn btnOutline"
+                      onClick={() => downloadSummary(x._id)}
+                      disabled={downloading === x._id}
+                    >
+                      {downloading === x._id ? t("Downloading...") : t("Download Summary")}
                     </button>
                   )}
 
@@ -214,21 +305,17 @@ export default function OwnerExits() {
                       {purgeBusy === x._id ? t("Deleting...") : t("Delete Data")}
                     </button>
                   )}
-
-                  {x.status === "settled" && (
-                    <span className="muted" style={{ fontSize: 13 }}>
-                      {t("Refund")}: <b style={{ color: "#111827" }}>NPR {x.refundableAmount}</b>
-                    </span>
-                  )}
                 </div>
 
-                {x.status === "settled" ? (
+                {(x.status === "settled" || x.status === "settlement_pending") && x.settlementAt && x.hasPaidRent && x.isEarlyExit && !x.settlementPaid ? (
                   <div className="muted" style={{ marginTop: 10, fontSize: 13, lineHeight: 1.7 }}>
-                    {t("Deposit")}: <b style={{ color: "#111827" }}>{x.securityDeposit}</b> •
+                    {t("Deposit")}: <b style={{ color: "#111827" }}>{x.depositPaid ?? x.securityDeposit}</b> •
                     {t("Unpaid")}: <b style={{ color: "#111827" }}> {x.unpaidRent}</b> •
                     {t("Damages")}: <b style={{ color: "#111827" }}> {x.damagesCost}</b> •
-                    {t("Others")}: <b style={{ color: "#111827" }}> {x.otherDeductions}</b> •
-                    {t("Refund")}: <b style={{ color: "#111827" }}> {x.refundableAmount}</b>
+                    {t("Others")}: <b style={{ color: "#111827" }}> {x.otherDeductions}</b>
+                    {Number(x.electricityAmount || 0) > 0 && (
+                      <> • {t("Electricity")}: <b style={{ color: "#111827" }}> {x.electricityAmount}</b></>
+                    )}
                   </div>
                 ) : null}
 
@@ -265,6 +352,21 @@ export default function OwnerExits() {
       </Modal>
 
       <Modal open={openSettle} title={t("Settle Exit")} subtitle={t("Enter deductions and confirm refund.")} onClose={() => setOpenSettle(false)}>
+        {selected?.rentPerDay ? (
+          <div className="card cardPad" style={{ boxShadow: "none", marginBottom: 12 }}>
+            <div className="muted" style={{ fontSize: 12 }}>
+              {t("Per-day rent")}: NPR {selected.rentPerDay} / {t("day")} •{" "}
+              {t("Days charged")}: {selected.daysCharged} / {selected.daysInMonth}{" "}
+              {selected.proratedFirstMonth ? `• ${t("Prorated")}` : ""}
+            </div>
+            <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
+              {t("Calculated unpaid rent")}: <b style={{ color: "#111827" }}>NPR {selected.computedUnpaidRent ?? 0}</b>
+            </div>
+            <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
+              {t("Electricity due")}: <b style={{ color: "#111827" }}>NPR {electricityAmount || "0"}</b>
+            </div>
+          </div>
+        ) : null}
         <div className="row" style={{ flexWrap: "wrap" }}>
           <div style={{ flex: 1, minWidth: 180 }}>
             <div className="muted" style={{ fontSize: 13 }}>{t("Unpaid rent")}</div>
@@ -302,6 +404,34 @@ export default function OwnerExits() {
             />
             {settleErrors.otherDeductions ? <div className="fieldErr">{settleErrors.otherDeductions}</div> : null}
           </div>
+          <div style={{ flex: 1, minWidth: 180 }}>
+            <div className="muted" style={{ fontSize: 13 }}>{t("Electricity units")}</div>
+            <input
+              className={`input ${settleErrors.electricityUnits ? "inputErr" : ""}`}
+              value={electricityUnits}
+              onChange={(e) => {
+                setElectricityUnits(e.target.value);
+                if (settleErrors.electricityUnits) setSettleErrors((p) => ({ ...p, electricityUnits: "" }));
+              }}
+            />
+            {settleErrors.electricityUnits ? <div className="fieldErr">{settleErrors.electricityUnits}</div> : null}
+          </div>
+          <div style={{ flex: 1, minWidth: 180 }}>
+            <div className="muted" style={{ fontSize: 13 }}>{t("Unit rate")}</div>
+            <input
+              className={`input ${settleErrors.electricityUnitRate ? "inputErr" : ""}`}
+              value={electricityUnitRate}
+              onChange={(e) => {
+                setElectricityUnitRate(e.target.value);
+                if (settleErrors.electricityUnitRate) setSettleErrors((p) => ({ ...p, electricityUnitRate: "" }));
+              }}
+            />
+            {settleErrors.electricityUnitRate ? <div className="fieldErr">{settleErrors.electricityUnitRate}</div> : null}
+          </div>
+          <div style={{ flex: 1, minWidth: 180 }}>
+            <div className="muted" style={{ fontSize: 13 }}>{t("Electricity due")}</div>
+            <input className="input" value={electricityAmount} readOnly />
+          </div>
         </div>
 
         <div className="spacer" />
@@ -319,11 +449,20 @@ export default function OwnerExits() {
         {settleErrors.ownerNote ? <div className="fieldErr">{settleErrors.ownerNote}</div> : null}
 
         <div className="spacer" />
-        <div className="row" style={{ justifyContent: "flex-end" }}>
-          <button className="btn btnOutline" onClick={() => setOpenSettle(false)}>{t("Cancel")}</button>
-          <button className="btn" onClick={settle} disabled={sendingSettle}>
-            {sendingSettle ? t("Saving...") : t("Settle & End Agreement")}
+        <div className="row" style={{ justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+          <button
+            className="btn btnOutline"
+            onClick={() => downloadSummary(selected?._id)}
+            disabled={!selected?._id || downloading === selected?._id}
+          >
+            {downloading === selected?._id ? t("Downloading...") : t("Download Summary")}
           </button>
+          <div className="row" style={{ gap: 8 }}>
+            <button className="btn btnOutline" onClick={() => setOpenSettle(false)}>{t("Cancel")}</button>
+            <button className="btn" onClick={settle} disabled={sendingSettle}>
+              {sendingSettle ? t("Saving...") : t("Settle Exit")}
+            </button>
+          </div>
         </div>
       </Modal>
     </div>

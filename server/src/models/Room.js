@@ -7,6 +7,7 @@ const roomSchema = new mongoose.Schema(
         title: { type: String, required: true, trim: true },
         location: { type: String, required: true, trim: true }, // e.g., "Koteshwor, Kathmandu"
         monthlyRent: { type: Number, required: true, min: 0 },
+        electricityUnitRate: { type: Number, default: 0, min: 0 },
 
         roomType: {
             type: String,
@@ -30,6 +31,8 @@ const roomSchema = new mongoose.Schema(
 
         photos: { type: [String], default: [] },
         isPublished: { type: Boolean, default: false },
+        autoDisabledByFraud: { type: Boolean, default: false },
+        autoDisabledAt: { type: Date },
 
         geo: {
             lat: { type: Number },
@@ -49,6 +52,19 @@ const roomSchema = new mongoose.Schema(
         requiresImprovement: { type: Boolean, default: false },
         improvementNote: { type: String, default: "" },
         improvementRequestedAt: { type: Date },
+        ratingAvg: { type: Number, default: 0 },
+        ratingCount: { type: Number, default: 0 },
+        ratings: {
+            type: [
+                {
+                    user: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+                    score: { type: Number, min: 1, max: 5 },
+                    comment: { type: String, trim: true, maxlength: 500 },
+                    createdAt: { type: Date, default: Date.now },
+                },
+            ],
+            default: [],
+        },
     },
     { timestamps: true }
 );

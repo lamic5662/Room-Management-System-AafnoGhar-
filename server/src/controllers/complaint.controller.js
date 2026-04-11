@@ -3,6 +3,10 @@ import Complaint from "../models/Complaint.js";
 import Agreement from "../models/Agreement.js";
 import { notifyUser } from "../services/notify.service.js";
 
+const CATEGORY_VALUES = ["plumbing", "electrical", "internet", "cleaning", "structural", "other"];
+const PRIORITY_VALUES = ["low", "medium", "high", "urgent"];
+const PRIORITY_WEIGHT = { urgent: 0, high: 1, medium: 2, low: 3 };
+
 // TENANT: create complaint
 const createComplaint = async (req, res) => {
     try {
@@ -10,7 +14,7 @@ const createComplaint = async (req, res) => {
             return res.status(403).json({ message: "Tenant access only" });
         }
 
-        let { agreementId, title, description, message } = req.body || {};
+        let { agreementId, title, description, message, category, priority } = req.body || {};
         if (!title || !description) {
             if (message) {
                 if (!title) title = "Complaint";
@@ -19,6 +23,12 @@ const createComplaint = async (req, res) => {
         }
         if (!agreementId || !title || !description) {
             return res.status(400).json({ message: "agreementId, title, description are required" });
+        }
+        if (category && !CATEGORY_VALUES.includes(category)) {
+            return res.status(400).json({ message: "Invalid category" });
+        }
+        if (priority && !PRIORITY_VALUES.includes(priority)) {
+            return res.status(400).json({ message: "Invalid priority" });
         }
         if (!mongoose.Types.ObjectId.isValid(agreementId)) {
             return res.status(400).json({ message: "Invalid agreementId" });
@@ -41,12 +51,14 @@ const createComplaint = async (req, res) => {
             tenant: agreement.tenant,
             title,
             description,
+            category: category || "other",
+            priority: priority || "medium",
         });
 
         notifyUser({
             userId: agreement.owner,
-            title: "New complaint",
-            message: `Complaint from ${req.user.fullName || "tenant"}`,
+            title: "New maintenance request",
+            message: `Maintenance request from ${req.user.fullName || "tenant"}`,
             type: "complaint",
             data: { complaintId: complaint._id, agreementId: agreement._id, url: "/owner/complaints" },
         });
@@ -71,7 +83,13 @@ const myComplaints = async (req, res) => {
             .populate("agreement", "monthlyRent status")
             .sort({ createdAt: -1 });
 
-        res.json({ count: complaints.length, complaints });
+        const sorted = complaints.sort((a, b) => {
+            const pa = PRIORITY_WEIGHT[a.priority || "medium"] ?? 2;
+            const pb = PRIORITY_WEIGHT[b.priority || "medium"] ?? 2;
+            if (pa !== pb) return pa - pb;
+            return new Date(b.createdAt) - new Date(a.createdAt);
+        });
+        res.json({ count: sorted.length, complaints: sorted });
     } catch (err) {
         console.log("My complaints error:", err.message);
         res.status(500).json({ message: "Server error" });
@@ -91,7 +109,13 @@ const incomingComplaints = async (req, res) => {
             .populate("agreement", "monthlyRent status")
             .sort({ createdAt: -1 });
 
-        res.json({ count: complaints.length, complaints });
+        const sorted = complaints.sort((a, b) => {
+            const pa = PRIORITY_WEIGHT[a.priority || "medium"] ?? 2;
+            const pb = PRIORITY_WEIGHT[b.priority || "medium"] ?? 2;
+            if (pa !== pb) return pa - pb;
+            return new Date(b.createdAt) - new Date(a.createdAt);
+        });
+        res.json({ count: sorted.length, complaints: sorted });
     } catch (err) {
         console.log("Incoming complaints error:", err.message);
         res.status(500).json({ message: "Server error" });
@@ -111,7 +135,6 @@ const ownerUpdateComplaint = async (req, res) => {
         if (status && !["open", "in_progress", "resolved", "rejected"].includes(status)) {
             return res.status(400).json({ message: "Invalid status" });
         }
-
         const complaint = await Complaint.findById(id);
         if (!complaint) return res.status(404).json({ message: "Complaint not found" });
 
@@ -121,13 +144,12 @@ const ownerUpdateComplaint = async (req, res) => {
 
         if (status) complaint.status = status;
         if (ownerReply !== undefined) complaint.ownerReply = ownerReply;
-
         await complaint.save();
 
         notifyUser({
             userId: complaint.tenant,
             title: "Complaint updated",
-            message: "Owner replied to your complaint",
+            message: "Owner updated your maintenance request",
             type: "complaint",
             data: { complaintId: complaint._id, agreementId: complaint.agreement, url: "/tenant/complaints" },
         });

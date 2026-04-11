@@ -3,6 +3,7 @@ import Request from "../models/Request.js";
 import Room from "../models/Room.js";
 import Agreement from "../models/Agreement.js";
 import { notifyUser } from "../services/notify.service.js";
+import { recordOwnerResponse } from "../services/responseStats.service.js";
 
 // Tenant: send request for a room
 const createRequest = async (req, res) => {
@@ -44,12 +45,20 @@ const createRequest = async (req, res) => {
             return res.status(409).json({ message: "You already have a pending request for this room" });
         }
 
-        const reqDoc = await Request.create({
-            room: roomId,
-            tenant: req.user._id,
-            owner: room.owner,
-            message: message || "",
-        });
+        let reqDoc;
+        try {
+            reqDoc = await Request.create({
+                room: roomId,
+                tenant: req.user._id,
+                owner: room.owner,
+                message: message || "",
+            });
+        } catch (err) {
+            if (err.code === 11000) {
+                return res.status(409).json({ message: "You already have a pending request for this room" });
+            }
+            throw err;
+        }
 
         notifyUser({
             userId: room.owner,
@@ -140,6 +149,15 @@ const updateRequestStatus = async (req, res) => {
             type: "request",
             data: { requestId: request._id, roomId: request.room, url: "/tenant/requests" },
         });
+
+        recordOwnerResponse({ ownerId: request.owner, createdAt: request.createdAt }).catch((err) => {
+            console.log("Record owner response error:", err.message);
+        });
+
+        if (status === "rejected") {
+            await Request.findByIdAndDelete(request._id);
+            return res.json({ message: "Request rejected and removed" });
+        }
 
         res.json({ message: "Request updated", request });
     } catch (err) {

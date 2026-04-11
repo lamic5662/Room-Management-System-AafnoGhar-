@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useParams } from "react-router-dom";
 import http from "../api/http";
 import Spinner from "../components/Spinner";
 import Modal from "../components/Modal";
@@ -68,7 +68,6 @@ export default function OwnerRoomRules() {
           <p className="muted" style={{ marginTop: 6 }}>{t("Create and manage rules for tenants.")}</p>
         </div>
         <div className="row">
-          <Link className="btn btnOutline" to="/owner/my-rooms">{t("Back")}</Link>
           <button className="btn" onClick={() => setOpen(true)}>{t("Add Rule")}</button>
         </div>
       </div>

@@ -65,6 +65,8 @@ export default function TenantAgreements() {
 
   const downloadPdf = async (agreementId) => {
     try {
+      const ok = window.confirm(t("Download agreement PDF?"));
+      if (!ok) return;
       const token = localStorage.getItem("token");
       const res = await fetch(`${API}/api/agreements/${agreementId}/pdf`, {
         headers: { Authorization: `Bearer ${token}` },
@@ -151,16 +153,56 @@ export default function TenantAgreements() {
 
               <div className="spacer" />
 
-              <div className="cardActions">
-                <button className="btn btnOutline" onClick={() => downloadPdf(a._id)}>
-                  ⬇ {t("Download PDF")}
-                </button>
-                <button className="btn btnOutline" onClick={() => openSign(a)}>
-                  ✍ {t("Upload Signature")}
-                </button>
-                <Link className="btn" to={`/tenant/pay/${a._id}`}>
-                  💳 {t("Pay Rent")}
+              <div className="agreementActions">
+                {a.status !== "ended" && (
+                  <Link
+                    className="btn agreementIconBtn"
+                    to={`/tenant/pay/${a._id}`}
+                    data-tip={t("Pay Rent")}
+                    title={t("Pay Rent")}
+                    aria-label={t("Pay Rent")}
+                  >
+                    💳
+                  </Link>
+                )}
+                <Link
+                  className="btn btnOutline agreementIconBtn"
+                  to={`/tenant/agreements/${a._id}/chat`}
+                  data-tip={t("Chat")}
+                  title={t("Chat")}
+                  aria-label={t("Chat")}
+                >
+                  💬
                 </Link>
+                <Link
+                  className="btn btnOutline agreementIconBtn"
+                  to={`/tenant/agreements/${a._id}/timeline`}
+                  data-tip={t("Payment Timeline")}
+                  title={t("Payment Timeline")}
+                  aria-label={t("Payment Timeline")}
+                >
+                  📅
+                </Link>
+                {a.status !== "ended" && (
+                  <button
+                    className="btn agreementIconBtn"
+                    onClick={() => openSign(a)}
+                    data-tip={t("Upload Signature")}
+                    title={t("Upload Signature")}
+                    aria-label={t("Upload Signature")}
+                  >
+                    ✍
+                  </button>
+                )}
+                <button
+                  className="btn btnOutline agreementIconBtn"
+                  onClick={() => downloadPdf(a._id)}
+                  data-tip={t("Download PDF")}
+                  title={t("Download PDF")}
+                  aria-label={t("Download PDF")}
+                >
+                  ⬇
+                </button>
               </div>
             </div>
           ))}

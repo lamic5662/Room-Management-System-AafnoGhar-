@@ -28,6 +28,9 @@ import userRoutes from "./routes/user.routes.js";
 import geoRoutes from "./routes/geo.routes.js";
 import electricityRoutes from "./routes/electricity.routes.js";
 import notificationRoutes from "./routes/notification.routes.js";
+import chatRoutes from "./routes/chat.routes.js";
+import savedSearchRoutes from "./routes/savedSearch.routes.js";
+import visitRoutes from "./routes/visit.routes.js";
 import errorHandler from "./middleware/error.middleware.js";
 
 const app = express();
@@ -73,6 +76,9 @@ app.use("/api/users", userRoutes);
 app.use("/api/geo", geoRoutes);
 app.use("/api/electricity", electricityRoutes);
 app.use("/api/notifications", notificationRoutes);
+app.use("/api/chat", chatRoutes);
+app.use("/api/saved-searches", savedSearchRoutes);
+app.use("/api/visits", visitRoutes);
 // Serve files from project-root /uploads (matches storage in upload middlewares)
 app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
 

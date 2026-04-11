@@ -2,9 +2,11 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import http from "../api/http";
 import Spinner from "../components/Spinner";
+import Modal from "../components/Modal";
 import { useToast } from "../context/ToastContext";
 import { getPhotoUrl } from "../utils/photo";
 import { useI18n } from "../context/I18nContext";
+import { formatRoomLocation } from "../utils/roomLocation";
 
 export default function Rooms() {
   const { showToast } = useToast();
@@ -20,7 +22,11 @@ export default function Rooms() {
   const [userPos, setUserPos] = useState(null);
   const user = useMemo(() => JSON.parse(localStorage.getItem("user") || "null"), []);
   const isTenant = user?.role === "tenant";
+  const [showAllRooms, setShowAllRooms] = useState(false);
+  const [showAllLatest, setShowAllLatest] = useState(false);
+  const [showAllNearest, setShowAllNearest] = useState(false);
   const skipSearchEffect = useRef(true);
+  const skipSortEffect = useRef(true);
   const [suggestions, setSuggestions] = useState([]);
   const [suggestOpen, setSuggestOpen] = useState(false);
   const suggestWrapRef = useRef(null);
@@ -28,7 +34,7 @@ export default function Rooms() {
   const [search, setSearch] = useState("");
   const [minRent, setMinRent] = useState("");
   const [maxRent, setMaxRent] = useState("");
-  const [sort, setSort] = useState("newest");
+  const [sort, setSort] = useState("rating");
   const [roomType, setRoomType] = useState("");
 
   const [wifi, setWifi] = useState(false);
@@ -37,6 +43,9 @@ export default function Rooms() {
   const [electricityBackup, setElectricityBackup] = useState(false);
   const [kitchen, setKitchen] = useState(false);
   const [furnished, setFurnished] = useState(false);
+  const [saveOpen, setSaveOpen] = useState(false);
+  const [saveName, setSaveName] = useState("");
+  const [savingSearch, setSavingSearch] = useState(false);
 
   const calcKm = (lat1, lon1, lat2, lon2) => {
     const toRad = (v) => (v * Math.PI) / 180;
@@ -115,12 +124,52 @@ export default function Rooms() {
     }
   };
 
+
   useEffect(() => {
     const s = sp.get("search") || "";
-    if (s) setSearch(s);
-    setPage(1);
-    setTimeout(() => load(buildQuery({ search: s, page: 1 })), 0);
+    const min = sp.get("minRent");
+    const max = sp.get("maxRent");
+    const so = sp.get("sort") || "rating";
+    const rt = sp.get("roomType") || "";
+    const w = sp.get("wifi") === "true";
+    const p = sp.get("parking") === "true";
+    const ws = sp.get("waterSupply") === "true";
+    const eb = sp.get("electricityBackup") === "true";
+    const k = sp.get("kitchen") === "true";
+    const f = sp.get("furnished") === "true";
+
     skipSearchEffect.current = true;
+    skipSortEffect.current = true;
+    setSearch(s);
+    setMinRent(min === null ? "" : String(min));
+    setMaxRent(max === null ? "" : String(max));
+    setSort(so || "rating");
+    setRoomType(rt);
+    setWifi(w);
+    setParking(p);
+    setWaterSupply(ws);
+    setElectricityBackup(eb);
+    setKitchen(k);
+    setFurnished(f);
+    setPage(1);
+    setShowAllRooms(false);
+    setShowAllLatest(false);
+    setShowAllNearest(false);
+    const q = buildQuery({
+      search: s,
+      minRent: min ?? "",
+      maxRent: max ?? "",
+      sort: so || "rating",
+      roomType: rt,
+      wifi: w,
+      parking: p,
+      waterSupply: ws,
+      electricityBackup: eb,
+      kitchen: k,
+      furnished: f,
+      page: 1,
+    });
+    setTimeout(() => load(q), 0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -145,6 +194,16 @@ export default function Rooms() {
     return () => clearTimeout(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search]);
+
+  useEffect(() => {
+    if (skipSortEffect.current) {
+      skipSortEffect.current = false;
+      return;
+    }
+    setPage(1);
+    load(buildQuery({ page: 1, sort, roomType }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sort, roomType]);
 
   useEffect(() => {
     const onClick = (e) => {
@@ -178,8 +237,14 @@ export default function Rooms() {
     return () => clearTimeout(id);
   }, [search]);
 
-  const viewRooms = useMemo(() => {
-    if (!isTenant || !userPos) return rooms;
+  const viewRooms = useMemo(() => rooms, [rooms]);
+
+  const latestRoomsAll = useMemo(() => {
+    return [...rooms].sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+  }, [rooms]);
+
+  const nearestRoomsAll = useMemo(() => {
+    if (!isTenant || !userPos) return [];
     const withDistance = rooms.map((r) => {
       const lat = r.geo?.lat;
       const lng = r.geo?.lng;
@@ -188,8 +253,12 @@ export default function Rooms() {
       return { r, d };
     });
     withDistance.sort((a, b) => a.d - b.d);
-    return withDistance.map((x) => x.r);
+    return withDistance.filter((x) => x.d <= 5).map((x) => x.r);
   }, [rooms, isTenant, userPos]);
+
+  const allRoomsDisplay = showAllRooms ? viewRooms : viewRooms.slice(0, 6);
+  const latestRoomsDisplay = showAllLatest ? latestRoomsAll : latestRoomsAll.slice(0, 6);
+  const nearestRoomsDisplay = showAllNearest ? nearestRoomsAll : nearestRoomsAll.slice(0, 6);
 
   const apply = () => {
     setPage(1);
@@ -200,7 +269,7 @@ export default function Rooms() {
     setSearch("");
     setMinRent("");
     setMaxRent("");
-    setSort("newest");
+    setSort("rating");
     setRoomType("");
     setWifi(false);
     setParking(false);
@@ -213,7 +282,7 @@ export default function Rooms() {
       search: "",
       minRent: "",
       maxRent: "",
-      sort: "newest",
+      sort: "rating",
       roomType: "",
       wifi: false,
       parking: false,
@@ -224,6 +293,38 @@ export default function Rooms() {
       page: 1,
     });
     load(emptyQuery);
+  };
+
+  const buildSavedPayload = () => ({
+    name: saveName.trim(),
+    search,
+    minRent,
+    maxRent,
+    roomType,
+    sort,
+    facilities: {
+      wifi,
+      parking,
+      waterSupply,
+      electricityBackup,
+      kitchen,
+      furnished,
+    },
+  });
+
+  const saveSearch = async () => {
+    if (!isTenant || savingSearch) return;
+    try {
+      setSavingSearch(true);
+      await http.post("/api/saved-searches", buildSavedPayload());
+      showToast("success", t("Saved search created ✅"));
+      setSaveOpen(false);
+      setSaveName("");
+    } catch (e) {
+      showToast("error", e?.response?.data?.message || t("Failed to save search"));
+    } finally {
+      setSavingSearch(false);
+    }
   };
 
   return (
@@ -279,6 +380,7 @@ export default function Rooms() {
 
           <div className="filtersSelects">
             <select className="input filterSelect" value={sort} onChange={(e) => setSort(e.target.value)}>
+              <option value="rating">{t("Top rated")}</option>
               <option value="newest">{t("Newest")}</option>
               <option value="price_asc">{t("Price: Low → High")}</option>
               <option value="price_desc">{t("Price: High → Low")}</option>
@@ -323,6 +425,11 @@ export default function Rooms() {
 
             <div className="filtersActions">
               <button className="btn btnOutline" onClick={reset}>{t("Reset")}</button>
+              {isTenant ? (
+                <button className="btn btnOutline" onClick={() => setSaveOpen(true)}>
+                  {t("Save search")}
+                </button>
+              ) : null}
               <button className="btn" onClick={apply}>{t("Apply")}</button>
             </div>
           </div>
@@ -336,48 +443,109 @@ export default function Rooms() {
       ) : viewRooms.length === 0 ? (
         <div className="card cardPad">{t("No rooms found. Try changing filters.")}</div>
       ) : (
-        <div className="roomGrid">
-          {viewRooms.map((r) => {
-            const img = r.photos?.[0] ? getPhotoUrl(r.photos[0]) : "";
-            const isVerified = r.isVerifiedOwner ?? (r.owner?.kyc?.status === "approved");
+        <>
+          <div className="featuredWrap roomsSection">
+            <div className="featuredHeader row" style={{ justifyContent: "space-between", alignItems: "center", flexWrap: "wrap" }}>
+              <h2 className="h3">{t("All Rooms")}</h2>
+              <div className="row" style={{ gap: 10, alignItems: "center" }}>
+                <div className="muted">{t("Showing filtered results")}</div>
+                {viewRooms.length > 6 && (
+                  <button
+                    type="button"
+                    className="btn btnOutline btnSm"
+                    onClick={() => setShowAllRooms((v) => !v)}
+                  >
+                    {showAllRooms ? t("Show less") : t("Show all")}
+                  </button>
+                )}
+              </div>
+            </div>
+            <div className="spacer" />
+            <div className={`featuredGrid roomsGrid ${showAllRooms ? "roomsGridExpanded" : ""}`}>
+              {allRoomsDisplay.map((r) => (
+                <RoomCard
+                  key={r._id}
+                  room={r}
+                  userPos={userPos}
+                  calcKm={calcKm}
+                  t={t}
+                />
+              ))}
+            </div>
+          </div>
 
-            return (
-              <Link key={r._id} to={`/rooms/${r._id}`} className="roomCard card">
-                <div className="roomImgWrap">
-                  {img ? (
-                    <img src={img} alt="room" className="roomImg" />
-                  ) : (
-                    <div className="roomImgEmpty">{t("No Photo")}</div>
-                  )}
-                  {isVerified ? <div className="vBadge">✓ {t("Verified")}</div> : null}
-                  <div className="roomPrice">NPR {r.monthlyRent}/mo</div>
-                </div>
+          <div className="spacer" />
+          <div className="featuredWrap roomsSection">
+            <div className="featuredHeader row" style={{ justifyContent: "space-between", alignItems: "center", flexWrap: "wrap" }}>
+              <h2 className="h3">{t("Latest Rooms")}</h2>
+              <div className="row" style={{ gap: 10, alignItems: "center" }}>
+                <div className="muted">{t("Recently added listings")}</div>
+                {latestRoomsAll.length > 6 && (
+                  <button
+                    type="button"
+                    className="btn btnOutline btnSm"
+                    onClick={() => setShowAllLatest((v) => !v)}
+                  >
+                    {showAllLatest ? t("Show less") : t("Show all")}
+                  </button>
+                )}
+              </div>
+            </div>
+            <div className="spacer" />
+            {latestRoomsAll.length === 0 ? (
+              <div className="card cardPad">{t("No recent rooms yet.")}</div>
+            ) : (
+              <div className={`featuredGrid roomsGrid ${showAllLatest ? "roomsGridExpanded" : ""}`}>
+                {latestRoomsDisplay.map((r) => (
+                  <RoomCard
+                    key={`${r._id}-latest`}
+                    room={r}
+                    userPos={userPos}
+                    calcKm={calcKm}
+                    t={t}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
 
-                <div className="roomBody">
-                  <div className="roomTitle">{r.title}</div>
-                  <div className="muted roomLoc">
-                    <span aria-hidden="true">📍</span> {r.location}
-                  </div>
-                  {userPos && r.geo?.lat && r.geo?.lng ? (
-                    <div className="muted roomLoc" style={{ marginTop: 4 }}>
-                      <span aria-hidden="true">🧭</span> {t("Distance")}: {calcKm(userPos.lat, userPos.lng, r.geo.lat, r.geo.lng).toFixed(1)} km
-                    </div>
-                  ) : null}
-
-                  <div className="roomBadges">
-                    {r.roomType && <span className="badge">{r.roomType}</span>}
-                    {r.facilities?.wifi && <span className="badge">{t("WiFi")}</span>}
-                    {r.facilities?.parking && <span className="badge">{t("Parking")}</span>}
-                    {r.facilities?.waterSupply && <span className="badge">{t("Water")}</span>}
-                    {r.facilities?.electricityBackup && <span className="badge">{t("Backup")}</span>}
-                    {r.facilities?.kitchen && <span className="badge">{t("Kitchen")}</span>}
-                    {r.facilities?.furnished && <span className="badge">{t("Furnished")}</span>}
-                  </div>
-                </div>
-              </Link>
-            );
-          })}
-        </div>
+          <div className="spacer" />
+          <div className="featuredWrap roomsSection">
+            <div className="featuredHeader row" style={{ justifyContent: "space-between", alignItems: "center", flexWrap: "wrap" }}>
+              <h2 className="h3">{t("Shortest Distance")}</h2>
+              <div className="row" style={{ gap: 10, alignItems: "center" }}>
+                <div className="muted">{t("Nearby rooms based on your location")}</div>
+                {nearestRoomsAll.length > 6 && (
+                  <button
+                    type="button"
+                    className="btn btnOutline btnSm"
+                    onClick={() => setShowAllNearest((v) => !v)}
+                  >
+                    {showAllNearest ? t("Show less") : t("Show all")}
+                  </button>
+                )}
+              </div>
+            </div>
+            <div className="spacer" />
+            {!isTenant || !userPos ? (
+              <div className="card cardPad">{t("Enable location to see nearby rooms.")}</div>
+            ) : nearestRoomsAll.length === 0 ? (
+              <div className="card cardPad">{t("No nearby rooms found.")}</div>
+            ) : (
+              <div className={`featuredGrid roomsGrid ${showAllNearest ? "roomsGridExpanded" : ""}`}>
+                {nearestRoomsDisplay.map((r) => (
+                  <RoomCard
+                    key={`${r._id}-near`}
+                    room={r}
+                    userPos={userPos}
+                    calcKm={calcKm}
+                    t={t}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        </>
       )}
 
       {pages > 1 && (
@@ -387,7 +555,7 @@ export default function Rooms() {
             onClick={() => load(buildQuery({ page: Math.max(1, page - 1) }))}
             disabled={page <= 1}
           >
-            {t("Back")}
+            {t("Previous")}
           </button>
           <div className="muted">
             {page} / {pages}
@@ -401,6 +569,28 @@ export default function Rooms() {
           </button>
         </div>
       )}
+
+      <Modal
+        open={saveOpen}
+        title={t("Save search")}
+        subtitle={t("Save current filters and get alerts for new rooms.")}
+        onClose={() => setSaveOpen(false)}
+      >
+        <label className="muted" style={{ fontSize: 13 }}>{t("Search name (optional)")}</label>
+        <input
+          className="input"
+          value={saveName}
+          onChange={(e) => setSaveName(e.target.value)}
+          placeholder={t("e.g. Budget 1BHK near city")}
+        />
+        <div className="spacer" />
+        <div className="row" style={{ justifyContent: "flex-end" }}>
+          <button className="btn btnOutline" onClick={() => setSaveOpen(false)}>{t("Cancel")}</button>
+          <button className="btn" onClick={saveSearch} disabled={savingSearch}>
+            {savingSearch ? t("Saving...") : t("Save search")}
+          </button>
+        </div>
+      </Modal>
     </div>
   );
 }
@@ -415,5 +605,80 @@ function Check({ label, value, setValue }) {
     >
       {value ? "✓ " : ""}{label}
     </button>
+  );
+}
+
+function RoomCard({ room, userPos, calcKm, t }) {
+  const img = room.photos?.[0] ? getPhotoUrl(room.photos[0]) : "";
+  const isVerified = room.isVerifiedOwner ?? (room.owner?.kyc?.status === "approved");
+  const isFastResponder = room.isFastResponder ?? (room.owner?.responseStats?.fastResponder);
+  const responseCount = room.owner?.responseStats?.count ?? 0;
+  const responseAvg = room.owner?.responseStats?.avgMinutes ?? 0;
+
+  const formatResponseMinutes = (mins) => {
+    if (!Number.isFinite(mins) || mins <= 0) return null;
+    if (mins < 60) return `${mins} ${t("min")}`;
+    const hours = Math.floor(mins / 60);
+    const remaining = mins % 60;
+    if (remaining === 0) return `${hours} ${t("hr")}`;
+    return `${hours} ${t("hr")} ${remaining} ${t("min")}`;
+  };
+  const responseText = formatResponseMinutes(responseAvg);
+
+  return (
+    <Link to={`/rooms/${room._id}`} className="roomCard card">
+      <div className="roomImgWrap">
+        {img ? (
+          <img src={img} alt="room" className="roomImg" />
+        ) : (
+          <div className="roomImgEmpty">{t("No Photo")}</div>
+        )}
+        {isVerified ? <div className="vBadge">✓ {t("Verified")}</div> : null}
+        <div className="roomPrice">NPR {room.monthlyRent}/mo</div>
+      </div>
+
+      <div className="roomBody">
+        <div className="roomTitle">{room.title}</div>
+        <div className="muted roomLoc">
+          <span aria-hidden="true">📍</span>{" "}
+          {formatRoomLocation(room.location, room.geo) || t("Location not provided")}
+        </div>
+        {userPos && room.geo?.lat && room.geo?.lng ? (
+          <div className="muted roomLoc" style={{ marginTop: 4 }}>
+            <span aria-hidden="true">🧭</span> {t("Distance")}: {calcKm(userPos.lat, userPos.lng, room.geo.lat, room.geo.lng).toFixed(1)} km
+          </div>
+        ) : null}
+
+        <div className="row" style={{ justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
+          <div className="roomBadges">
+            {isFastResponder ? <span className="badge badgeFast">⚡ {t("Fast Responder")}</span> : null}
+            {responseText ? (
+              <span className="badge">{t("Avg Response Time")}: {responseText}</span>
+            ) : null}
+            {responseCount > 0 ? <span className="badge">{t("Responses")}: {responseCount}</span> : null}
+            {room.roomType && <span className="badge">{room.roomType}</span>}
+            {room.facilities?.wifi && <span className="badge">{t("WiFi")}</span>}
+            {room.facilities?.parking && <span className="badge">{t("Parking")}</span>}
+            {room.facilities?.waterSupply && <span className="badge">{t("Water")}</span>}
+            {room.facilities?.electricityBackup && <span className="badge">{t("Backup")}</span>}
+            {room.facilities?.kitchen && <span className="badge">{t("Kitchen")}</span>}
+            {room.facilities?.furnished && <span className="badge">{t("Furnished")}</span>}
+          </div>
+          <div className="roomCardRating">
+            <span className="roomCardRatingValue">{room.ratingAvg ? room.ratingAvg.toFixed(1) : "0.0"}</span>
+            <div className="ratingStarsSmall">
+              {[1, 2, 3, 4, 5].map((value) => (
+                <span
+                  key={`room-rating-${room._id}-${value}`}
+                  style={{ color: value <= Math.round(room.ratingAvg || 0) ? "#fcd34d" : "#e5e7eb" }}
+                >
+                  ★
+                </span>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    </Link>
   );
 }

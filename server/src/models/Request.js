@@ -19,6 +19,12 @@ const requestSchema = new mongoose.Schema(
 );
 
 // optional but useful: only 1 pending request per tenant per room
-requestSchema.index({ room: 1, tenant: 1, status: 1 });
+requestSchema.index(
+    { room: 1, tenant: 1 },
+    {
+        unique: true,
+        partialFilterExpression: { status: "pending" },
+    }
+);
 
 export default mongoose.model("Request", requestSchema);

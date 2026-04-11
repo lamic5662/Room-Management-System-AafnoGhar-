@@ -13,18 +13,27 @@ const exitRequestSchema = new mongoose.Schema(
 
     status: {
       type: String,
-      enum: ["requested", "approved", "rejected", "settled"],
+      enum: ["requested", "approved", "rejected", "settlement_pending", "settled"],
       default: "requested",
     },
 
     securityDeposit: { type: Number, default: 0 },
+    depositPaid: { type: Number, default: null },
     unpaidRent: { type: Number, default: 0 },
     damagesCost: { type: Number, default: 0 },
     otherDeductions: { type: Number, default: 0 },
+    electricityUnits: { type: Number, default: 0 },
+    electricityUnitRate: { type: Number, default: 0 },
+    electricityAmount: { type: Number, default: 0 },
     ownerNote: { type: String, default: "", trim: true },
 
     refundableAmount: { type: Number, default: 0 },
     settlementAt: { type: Date },
+    settlementPaid: { type: Boolean, default: false },
+    settlementPaidAt: { type: Date },
+    settlementPayment: { type: mongoose.Schema.Types.ObjectId, ref: "Payment", default: null },
+    reviewReminderSent: { type: Boolean, default: false },
+    reviewReminderSentAt: { type: Date },
   },
   { timestamps: true }
 );

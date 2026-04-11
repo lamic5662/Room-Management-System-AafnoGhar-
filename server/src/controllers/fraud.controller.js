@@ -1,6 +1,8 @@
 import Room from "../models/Room.js";
 import { evaluateRoomFraud } from "../services/fraud.service.js";
 import { cleanupRoomResources } from "./room.controller.js";
+import { applyAutoFraudPolicy } from "../services/autoFraud.service.js";
+import { logAdminAction } from "../services/auditLog.service.js";
 
 const mergeTrendData = (flaggedRows, improvementRows, publishedRows, days, startDate) => {
   const flaggedMap = new Map(flaggedRows.map((row) => [row._id, row.count || 0]));
@@ -28,7 +30,9 @@ const FRAUD_TREND_DAYS = 7;
 
 const fraudSummary = async (req, res) => {
   try {
-    if (req.user.role !== "admin") return res.status(403).json({ message: "Admin access only" });
+    if (!["admin", "super_admin", "moderator"].includes(req.user.role)) {
+      return res.status(403).json({ message: "Admin access only" });
+    }
 
     const [flagged, improvement, publishedFlagged] = await Promise.all([
       Room.countDocuments({ isFlagged: true }),
@@ -49,7 +53,9 @@ const fraudSummary = async (req, res) => {
 
 const fraudTrend = async (req, res) => {
   try {
-    if (req.user.role !== "admin") return res.status(403).json({ message: "Admin access only" });
+    if (!["admin", "super_admin", "moderator"].includes(req.user.role)) {
+      return res.status(403).json({ message: "Admin access only" });
+    }
 
     const now = new Date();
     const startDate = new Date(now);
@@ -121,7 +127,9 @@ const fraudTrend = async (req, res) => {
 
 const flaggedRooms = async (req, res) => {
   try {
-    if (req.user.role !== "admin") return res.status(403).json({ message: "Admin access only" });
+    if (!["admin", "super_admin", "moderator"].includes(req.user.role)) {
+      return res.status(403).json({ message: "Admin access only" });
+    }
 
     const rooms = await Room.find({ isFlagged: true })
       .sort({ fraudScore: -1, createdAt: -1 })
@@ -136,7 +144,9 @@ const flaggedRooms = async (req, res) => {
 
 const unflagRoom = async (req, res) => {
   try {
-    if (req.user.role !== "admin") return res.status(403).json({ message: "Admin access only" });
+    if (!["admin", "super_admin", "moderator"].includes(req.user.role)) {
+      return res.status(403).json({ message: "Admin access only" });
+    }
 
     const room = await Room.findById(req.params.id);
     if (!room) return res.status(404).json({ message: "Room not found" });
@@ -144,7 +154,18 @@ const unflagRoom = async (req, res) => {
     room.isFlagged = false;
     room.fraudScore = 0;
     room.fraudFlags = [];
+    room.autoDisabledByFraud = false;
+    room.autoDisabledAt = undefined;
     await room.save();
+
+    logAdminAction({
+      adminId: req.user._id,
+      action: "room.unflag",
+      entityType: "room",
+      entityId: room._id,
+      meta: { title: room.title },
+      req,
+    });
 
     res.json({ message: "Room unflagged", room });
   } catch (err) {
@@ -155,13 +176,28 @@ const unflagRoom = async (req, res) => {
 
 const disableRoom = async (req, res) => {
   try {
-    if (req.user.role !== "admin") return res.status(403).json({ message: "Admin access only" });
+    if (!["admin", "super_admin", "moderator"].includes(req.user.role)) {
+      return res.status(403).json({ message: "Admin access only" });
+    }
 
     const room = await Room.findById(req.params.id);
     if (!room) return res.status(404).json({ message: "Room not found" });
 
     room.isPublished = false;
+    room.autoDisabledByFraud = false;
+    room.autoDisabledAt = undefined;
+    room.autoDisabledByFraud = false;
+    room.autoDisabledAt = undefined;
     await room.save();
+
+    logAdminAction({
+      adminId: req.user._id,
+      action: "room.disable",
+      entityType: "room",
+      entityId: room._id,
+      meta: { title: room.title },
+      req,
+    });
 
     res.json({ message: "Room disabled", room });
   } catch (err) {
@@ -172,13 +208,26 @@ const disableRoom = async (req, res) => {
 
 const enableRoom = async (req, res) => {
   try {
-    if (req.user.role !== "admin") return res.status(403).json({ message: "Admin access only" });
+    if (!["admin", "super_admin", "moderator"].includes(req.user.role)) {
+      return res.status(403).json({ message: "Admin access only" });
+    }
 
     const room = await Room.findById(req.params.id);
     if (!room) return res.status(404).json({ message: "Room not found" });
 
     room.isPublished = true;
+    room.autoDisabledByFraud = false;
+    room.autoDisabledAt = undefined;
     await room.save();
+
+    logAdminAction({
+      adminId: req.user._id,
+      action: "room.enable",
+      entityType: "room",
+      entityId: room._id,
+      meta: { title: room.title },
+      req,
+    });
 
     res.json({ message: "Room enabled", room });
   } catch (err) {
@@ -189,7 +238,9 @@ const enableRoom = async (req, res) => {
 
 const requestImprovement = async (req, res) => {
   try {
-    if (req.user.role !== "admin") return res.status(403).json({ message: "Admin access only" });
+    if (!["admin", "super_admin", "moderator"].includes(req.user.role)) {
+      return res.status(403).json({ message: "Admin access only" });
+    }
     const { id } = req.params;
     const { note } = req.body || {};
     if (!note || !note.trim()) {
@@ -204,6 +255,15 @@ const requestImprovement = async (req, res) => {
     room.improvementRequestedAt = new Date();
     await room.save();
 
+    logAdminAction({
+      adminId: req.user._id,
+      action: "room.improvement.request",
+      entityType: "room",
+      entityId: room._id,
+      meta: { note: note.trim(), title: room.title },
+      req,
+    });
+
     res.json({ message: "Improvement requested", room });
   } catch (err) {
     console.log("Request improvement error:", err.message);
@@ -213,7 +273,9 @@ const requestImprovement = async (req, res) => {
 
 const approveImprovement = async (req, res) => {
   try {
-    if (req.user.role !== "admin") return res.status(403).json({ message: "Admin access only" });
+    if (!["admin", "super_admin", "moderator"].includes(req.user.role)) {
+      return res.status(403).json({ message: "Admin access only" });
+    }
     const { id } = req.params;
     const room = await Room.findById(id);
     if (!room) return res.status(404).json({ message: "Room not found" });
@@ -228,7 +290,18 @@ const approveImprovement = async (req, res) => {
     room.isFlagged = false;
     room.fraudFlags = [];
     room.fraudScore = 0;
+    room.autoDisabledByFraud = false;
+    room.autoDisabledAt = undefined;
     await room.save();
+
+    logAdminAction({
+      adminId: req.user._id,
+      action: "room.improvement.approve",
+      entityType: "room",
+      entityId: room._id,
+      meta: { title: room.title },
+      req,
+    });
 
     res.json({ message: "Room approved", room });
   } catch (err) {
@@ -239,12 +312,23 @@ const approveImprovement = async (req, res) => {
 
 const deleteFlaggedRoom = async (req, res) => {
   try {
-    if (req.user.role !== "admin") return res.status(403).json({ message: "Admin access only" });
+    if (!["admin", "super_admin", "moderator"].includes(req.user.role)) {
+      return res.status(403).json({ message: "Admin access only" });
+    }
     const { id } = req.params;
     const room = await Room.findById(id);
     if (!room) return res.status(404).json({ message: "Room not found" });
 
     await cleanupRoomResources(room);
+
+    logAdminAction({
+      adminId: req.user._id,
+      action: "room.delete",
+      entityType: "room",
+      entityId: room._id,
+      meta: { title: room.title },
+      req,
+    });
 
     res.json({ message: "Room deleted" });
   } catch (err) {
@@ -255,7 +339,9 @@ const deleteFlaggedRoom = async (req, res) => {
 
 const recalcFraud = async (req, res) => {
   try {
-    if (req.user.role !== "admin") return res.status(403).json({ message: "Admin access only" });
+    if (!["admin", "super_admin", "moderator"].includes(req.user.role)) {
+      return res.status(403).json({ message: "Admin access only" });
+    }
 
     const room = await Room.findById(req.params.id);
     if (!room) return res.status(404).json({ message: "Room not found" });
@@ -265,7 +351,17 @@ const recalcFraud = async (req, res) => {
     room.fraudScore = score;
     room.fraudFlags = flags;
     room.isFlagged = isFlagged;
+    await applyAutoFraudPolicy(room, isFlagged);
     await room.save();
+
+    logAdminAction({
+      adminId: req.user._id,
+      action: "room.fraud.recalc",
+      entityType: "room",
+      entityId: room._id,
+      meta: { score, isFlagged },
+      req,
+    });
 
     res.json({ message: "Fraud score recalculated", room });
   } catch (err) {

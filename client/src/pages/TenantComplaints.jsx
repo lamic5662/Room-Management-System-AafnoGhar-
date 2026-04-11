@@ -17,6 +17,9 @@ export default function TenantComplaints() {
   const [agreementId, setAgreementId] = useState("");
   const [title, setTitle] = useState("Water issue");
   const [description, setDescription] = useState("Water is not available today.");
+  const [category, setCategory] = useState("plumbing");
+  const [priority, setPriority] = useState("medium");
+  const [priorityFilter, setPriorityFilter] = useState("all");
   const [sending, setSending] = useState(false);
 
   const load = async () => {
@@ -25,7 +28,7 @@ export default function TenantComplaints() {
       const res = await http.get("/api/complaints/my");
       setItems(res.data.complaints || []);
     } catch (e) {
-      showToast("error", e?.response?.data?.message || t("Failed to load complaints"));
+      showToast("error", e?.response?.data?.message || t("Failed to load requests"));
     } finally {
       setLoading(false);
     }
@@ -53,43 +56,74 @@ export default function TenantComplaints() {
     if (!description.trim()) return showToast("error", t("Write complaint description"));
     try {
       setSending(true);
-      await http.post("/api/complaints", { agreementId, title, description });
-      showToast("success", t("Complaint sent ✅"));
+      await http.post("/api/complaints", { agreementId, title, description, category, priority });
+      showToast("success", t("Request sent ✅"));
       setOpen(false);
       setTitle(t("Water issue"));
       setDescription(t("Water is not available today."));
+      setCategory("plumbing");
+      setPriority("medium");
       await load();
     } catch (e) {
-      showToast("error", e?.response?.data?.message || t("Failed to create complaint"));
+      showToast("error", e?.response?.data?.message || t("Failed to create request"));
     } finally {
       setSending(false);
     }
   };
 
-  if (loading) return <Spinner text={t("Loading complaints...")} />;
+  if (loading) return <Spinner text={t("Loading requests...")} />;
+
+  const filteredItems = priorityFilter === "all"
+    ? items
+    : items.filter((c) => (c.priority || "medium") === priorityFilter);
 
   return (
     <div>
       <div className="row" style={{ justifyContent: "space-between", flexWrap: "wrap" }}>
         <div>
-          <h1 className="h1">{t("Complaints")}</h1>
+          <h1 className="h1">{t("Maintenance Requests")}</h1>
           <p className="muted" style={{ marginTop: 6 }}>
-            {t("Create complaint and track responses.")}
+            {t("Create maintenance requests and track responses.")}
           </p>
         </div>
         <div className="row">
           <button className="btn btnOutline" onClick={load}>{t("Refresh")}</button>
-          <button className="btn" onClick={() => setOpen(true)}>{t("New Complaint")}</button>
+          <button className="btn" onClick={() => setOpen(true)}>{t("New Request")}</button>
         </div>
       </div>
 
       <div className="spacer" />
 
-      {items.length === 0 ? (
-        <div className="card cardPad">{t("No complaints yet.")}</div>
+      <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+        <button className={"pill " + (priorityFilter === "all" ? "" : "muted")} onClick={() => setPriorityFilter("all")}>
+          {t("All priorities")}
+        </button>
+        <button className={"pill " + (priorityFilter === "urgent" ? "" : "muted")} onClick={() => setPriorityFilter("urgent")}>
+          {t("Urgent")}
+        </button>
+        <button className={"pill " + (priorityFilter === "high" ? "" : "muted")} onClick={() => setPriorityFilter("high")}>
+          {t("High")}
+        </button>
+        <button className={"pill " + (priorityFilter === "medium" ? "" : "muted")} onClick={() => setPriorityFilter("medium")}>
+          {t("Medium")}
+        </button>
+        <button className={"pill " + (priorityFilter === "low" ? "" : "muted")} onClick={() => setPriorityFilter("low")}>
+          {t("Low")}
+        </button>
+        {priorityFilter !== "all" && (
+          <button className="pill pillInfo" onClick={() => setPriorityFilter("all")}>
+            {t("Clear filter")}
+          </button>
+        )}
+      </div>
+
+      <div className="spacer" />
+
+      {filteredItems.length === 0 ? (
+        <div className="card cardPad">{t("No requests yet.")}</div>
       ) : (
         <div className="gridCards">
-          {items.map((c) => (
+          {filteredItems.map((c) => (
             <div key={c._id} className="card cardPad">
               {c.room?.photos?.[0] ? (
                 <div className="card" style={{ overflow: "hidden", borderRadius: 14, border: "1px solid #e5e7eb", boxShadow: "none", marginBottom: 10 }}>
@@ -107,6 +141,13 @@ export default function TenantComplaints() {
                   <div className="muted" style={{ marginTop: 4 }}>{c.room?.location}</div>
                 </div>
                 <span className="badge">{(c.status || "open").toUpperCase()}</span>
+              </div>
+
+              <div className="spacer" />
+
+              <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+                <span className="pill">{(c.category || "other").toUpperCase()}</span>
+                <span className="pill pillInfo">{(c.priority || "medium").toUpperCase()}</span>
               </div>
 
               <div className="spacer" />
@@ -138,8 +179,8 @@ export default function TenantComplaints() {
 
       <Modal
         open={open}
-        title={t("New Complaint")}
-        subtitle={t("Choose agreement and write complaint.")}
+        title={t("New Maintenance Request")}
+        subtitle={t("Choose agreement and describe the issue.")}
         onClose={() => setOpen(false)}
       >
         <label className="muted" style={{ fontSize: 13 }}>{t("Agreement")}</label>
@@ -155,6 +196,28 @@ export default function TenantComplaints() {
 
         <label className="muted" style={{ fontSize: 13 }}>{t("Title")}</label>
         <input className="input" value={title} onChange={(e) => setTitle(e.target.value)} />
+
+        <div className="spacer" />
+
+        <label className="muted" style={{ fontSize: 13 }}>{t("Category")}</label>
+        <select className="input" value={category} onChange={(e) => setCategory(e.target.value)}>
+          <option value="plumbing">{t("Plumbing")}</option>
+          <option value="electrical">{t("Electrical")}</option>
+          <option value="internet">{t("Internet")}</option>
+          <option value="cleaning">{t("Cleaning")}</option>
+          <option value="structural">{t("Structural")}</option>
+          <option value="other">{t("Other")}</option>
+        </select>
+
+        <div className="spacer" />
+
+        <label className="muted" style={{ fontSize: 13 }}>{t("Priority")}</label>
+        <select className="input" value={priority} onChange={(e) => setPriority(e.target.value)}>
+          <option value="low">{t("Low")}</option>
+          <option value="medium">{t("Medium")}</option>
+          <option value="high">{t("High")}</option>
+          <option value="urgent">{t("Urgent")}</option>
+        </select>
 
         <div className="spacer" />
 

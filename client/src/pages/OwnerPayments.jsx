@@ -14,11 +14,51 @@ export default function OwnerPayments() {
   const [downloading, setDownloading] = useState("");
 
   const [tab, setTab] = useState("pending");
+  const [typeFilter, setTypeFilter] = useState("all");
+
+  const formatDate = (value) => {
+    if (!value) return "";
+    try {
+      return new Date(value).toLocaleDateString();
+    } catch {
+      return "";
+    }
+  };
+
+  const calcDueDate = (period, startDate) => {
+    if (!period) return null;
+    const [yearStr, monthStr] = String(period).split("-");
+    const year = Number(yearStr);
+    const month = Number(monthStr) - 1;
+    if (!Number.isFinite(year) || !Number.isFinite(month)) return null;
+    const start = startDate ? new Date(startDate) : null;
+    const dueDay = start && !Number.isNaN(start.getTime()) ? start.getDate() : 1;
+    const lastDay = new Date(year, month + 1, 0).getDate();
+    const day = Math.min(dueDay, lastDay);
+    return new Date(year, month, day);
+  };
+
+  const calcLateFee = (payment) => {
+    const rent = Number(payment?.rentAmount || 0);
+    if (rent <= 0) return 0;
+    const elec = Number(payment?.electricityAmount || 0);
+    const total = Number(payment?.amount || 0);
+    const late = total - rent - elec;
+    return late > 0.01 ? Number(late.toFixed(2)) : 0;
+  };
+
+  const classifyPayment = (p) => {
+    if (p?.exitAmount > 0) return "exit";
+    if (p?.rentAmount > 0) return "rent";
+    if (p?.electricityAmount > 0) return "electricity";
+    return "other";
+  };
 
   const filtered = useMemo(() => {
-    if (tab === "all") return items;
-    return items.filter((p) => (p.status || "pending") === tab);
-  }, [items, tab]);
+    const statusFiltered = tab === "all" ? items : items.filter((p) => (p.status || "pending") === tab);
+    if (typeFilter === "all") return statusFiltered;
+    return statusFiltered.filter((p) => classifyPayment(p) === typeFilter);
+  }, [items, tab, typeFilter]);
 
   const load = async () => {
     try {
@@ -74,7 +114,7 @@ export default function OwnerPayments() {
 
   return (
     <div>
-      <div className="row" style={{ justifyContent: "space-between", flexWrap: "wrap" }}>
+      <div className="row" style={{ justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
         <div>
           <h1 className="h1">{t("Payments")}</h1>
           <p className="muted" style={{ marginTop: 6 }}>
@@ -99,6 +139,38 @@ export default function OwnerPayments() {
         <span className="muted" style={{ marginLeft: 8, fontSize: 13 }}>
           {t("Showing")} {filtered.length} {t("payments")}
         </span>
+      </div>
+
+      <div className="spacer" />
+
+      <div className="row" style={{ flexWrap: "wrap" }}>
+        <button className={"pill " + (typeFilter === "all" ? "" : "muted")} onClick={() => setTypeFilter("all")}>
+          {t("All types")}
+        </button>
+        <button className={"pill " + (typeFilter === "rent" ? "" : "muted")} onClick={() => setTypeFilter("rent")}>
+          {t("Rent")}
+        </button>
+        <button
+          className={"pill " + (typeFilter === "electricity" ? "" : "muted")}
+          onClick={() => setTypeFilter("electricity")}
+        >
+          {t("Electricity")}
+        </button>
+        <button className={"pill " + (typeFilter === "exit" ? "" : "muted")} onClick={() => setTypeFilter("exit")}>
+          {t("Exit")}
+        </button>
+        <span className="muted" style={{ marginLeft: 8, fontSize: 13 }}>
+          {t("Receipts available after confirmation.")}
+        </span>
+      </div>
+
+      <div className="spacer" />
+
+      <div>
+        <div style={{ fontWeight: 900 }}>{t("Receipt history")}</div>
+        <div className="muted" style={{ fontSize: 13, marginTop: 4 }}>
+          {t("Review due dates, paid dates, late fees, and receipts.")}
+        </div>
       </div>
 
       <div className="spacer" />
@@ -162,6 +234,24 @@ export default function OwnerPayments() {
                   </div>
                 </div>
 
+                <div className="spacer" />
+
+                <div className="row" style={{ flexWrap: "wrap", gap: 8 }}>
+                  {p.rentAmount > 0 ? (
+                    <span className="pill pillInfo">
+                      {t("Due")}: {formatDate(calcDueDate(p.period, p.agreement?.startDate)) || "—"}
+                    </span>
+                  ) : null}
+                  <span className={`pill ${p.paidAt ? "pillOk" : "pillWarn"}`}>
+                    {t("Paid")}: {p.paidAt ? formatDate(p.paidAt) : t("Not paid yet")}
+                  </span>
+                  {calcLateFee(p) > 0 ? (
+                    <span className="pill pillBad">
+                      {t("Late fee")}: NPR {calcLateFee(p)}
+                    </span>
+                  ) : null}
+                </div>
+
                 {p.note ? (
                   <div className="muted" style={{ marginTop: 10, fontSize: 13 }}>
                     {t("Note")}: {p.note}
@@ -202,6 +292,7 @@ export default function OwnerPayments() {
           })}
         </div>
       )}
+
     </div>
   );
 }

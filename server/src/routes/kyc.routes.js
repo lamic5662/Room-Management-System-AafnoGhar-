@@ -4,6 +4,7 @@ import { requireAdmin } from "../middleware/admin.middleware.js";
 import { uploadKyc } from "../middleware/kycUpload.middleware.js";
 import {
     submitKyc,
+    updateKyc,
     myKyc,
     listPending,
     listApproved,
@@ -35,5 +36,15 @@ router.get("/summary", protect, requireAdmin, kycSummary);
 router.patch("/review/:userId", protect, requireAdmin, reviewKyc);
 router.patch("/:userId/approve", protect, requireAdmin, approveKyc);
 router.patch("/:userId/reject", protect, requireAdmin, rejectKyc);
+router.put(
+    "/update",
+    protect,
+    uploadKyc.fields([
+        { name: "front", maxCount: 1 },
+        { name: "back", maxCount: 1 },
+        { name: "selfie", maxCount: 1 },
+    ]),
+    updateKyc
+);
 
 export default router;

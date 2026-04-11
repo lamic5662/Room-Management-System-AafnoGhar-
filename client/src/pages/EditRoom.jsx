@@ -26,6 +26,7 @@ export default function EditRoom() {
     location: "",
     roomType: "1BHK",
     monthlyRent: "",
+    electricityUnitRate: "",
     rooms: 1,
     bathrooms: 1,
     description: "",
@@ -84,6 +85,7 @@ export default function EditRoom() {
         location: r.location || "",
         roomType: r.roomType || "1BHK",
         monthlyRent: r.monthlyRent || "",
+        electricityUnitRate: r.electricityUnitRate ?? "",
         rooms: r.rooms || 1,
         bathrooms: r.bathrooms || 1,
         description: r.description || "",
@@ -126,6 +128,9 @@ export default function EditRoom() {
     if (!form.roomType) nextErrors.roomType = t("Room type is required");
     const rent = Number(form.monthlyRent);
     if (!Number.isFinite(rent) || rent <= 0) nextErrors.monthlyRent = t("Monthly rent must be > 0");
+    if (form.electricityUnitRate !== "" && Number(form.electricityUnitRate) < 0) {
+      nextErrors.electricityUnitRate = t("Electricity unit rate must be >= 0");
+    }
     if (form.roomType !== "Single" && form.roomType !== "Other") {
       const rooms = Number(form.rooms);
       const baths = Number(form.bathrooms);
@@ -144,6 +149,7 @@ export default function EditRoom() {
         location: form.location,
         roomType: form.roomType,
         monthlyRent: Number(form.monthlyRent),
+        electricityUnitRate: form.electricityUnitRate === "" ? 0 : Number(form.electricityUnitRate),
         rooms: Number(form.rooms),
         bathrooms: Number(form.bathrooms),
         description: form.description,
@@ -289,7 +295,6 @@ export default function EditRoom() {
         </div>
 
         <div className="row">
-          <button className="btn btnOutline" onClick={() => navigate("/owner/my-rooms")}>{t("Back")}</button>
           <button className="btn" onClick={save} disabled={saving || loading}>
             {saving ? t("Saving...") : t("Save Changes")}
           </button>
@@ -380,8 +385,8 @@ export default function EditRoom() {
             {errors.roomType ? <div className="fieldErr">{errors.roomType}</div> : null}
             <div className="spacer" />
 
-            <div className="row">
-              <div style={{ flex: 1 }}>
+            <div className="row" style={{ flexWrap: "wrap" }}>
+              <div style={{ flex: "1 1 220px" }}>
                 <label className="muted" style={{ fontSize: 13 }}>{t("Monthly Rent (NPR)")}</label>
                 <input
                   className={`input ${errors.monthlyRent ? "inputErr" : ""}`}
@@ -395,6 +400,21 @@ export default function EditRoom() {
                   style={{ fontSize: 18, fontWeight: 900 }}
                 />
                 {errors.monthlyRent ? <div className="fieldErr">{errors.monthlyRent}</div> : null}
+              </div>
+              <div style={{ flex: "1 1 200px" }}>
+                <label className="muted" style={{ fontSize: 13 }}>{t("Electricity Rate (NPR/unit)")}</label>
+                <input
+                  className={`input ${errors.electricityUnitRate ? "inputErr" : ""}`}
+                  type="number"
+                  min="0"
+                  value={form.electricityUnitRate}
+                  onChange={(e) => {
+                    update("electricityUnitRate", e.target.value);
+                    if (errors.electricityUnitRate) setErrors((p) => ({ ...p, electricityUnitRate: "" }));
+                  }}
+                  placeholder={t("e.g. 12")}
+                />
+                {errors.electricityUnitRate ? <div className="fieldErr">{errors.electricityUnitRate}</div> : null}
               </div>
               {form.roomType !== "Single" && form.roomType !== "Other" ? (
                 <>

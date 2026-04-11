@@ -4,6 +4,8 @@ import path from "path";
 import Agreement from "../models/Agreement.js";
 import Request from "../models/Request.js";
 import Room from "../models/Room.js";
+import Visit from "../models/Visit.js";
+import { emitVisitDeletesByRoom } from "../services/visitRealtime.service.js";
 import { notifyUser } from "../services/notify.service.js";
 
 // helper
@@ -63,7 +65,11 @@ const createFromRequest = async (req, res) => {
             securityDeposit,
             startDate,
             endDate,
+            rentReminderDay: startDate.getDate(),
         });
+
+        await emitVisitDeletesByRoom(room._id);
+        await Visit.deleteMany({ room: room._id });
 
         notifyUser({
             userId: reqDoc.tenant,
@@ -76,6 +82,39 @@ const createFromRequest = async (req, res) => {
         res.status(201).json({ message: "Agreement created", agreement });
     } catch (err) {
         console.log("Create agreement error:", err.message);
+        res.status(500).json({ message: "Server error" });
+    }
+};
+
+// OWNER: update rent reminder day for agreement
+// PATCH /api/agreements/:id/reminder { day }
+const updateReminderDay = async (req, res) => {
+    try {
+        if (req.user.role !== "owner") {
+            return res.status(403).json({ message: "Owner access only" });
+        }
+
+        const { id } = req.params;
+        if (!id) return res.status(400).json({ message: "Agreement id required" });
+
+        const dayRaw = Number(req.body?.day);
+        if (!Number.isFinite(dayRaw)) {
+            return res.status(400).json({ message: "day must be a number" });
+        }
+        const day = Math.min(31, Math.max(1, Math.floor(dayRaw)));
+
+        const agreement = await Agreement.findById(id);
+        if (!agreement) return res.status(404).json({ message: "Agreement not found" });
+        if (String(agreement.owner) !== String(req.user._id)) {
+            return res.status(403).json({ message: "Not your agreement" });
+        }
+
+        agreement.rentReminderDay = day;
+        await agreement.save();
+
+        res.json({ message: "Reminder day updated", rentReminderDay: day });
+    } catch (err) {
+        console.log("Update reminder day error:", err.message);
         res.status(500).json({ message: "Server error" });
     }
 };
@@ -268,4 +307,4 @@ const signOwner = async (req, res) => {
     }
 };
 
-export { createFromRequest, myAgreements, myTenantAgreements, downloadAgreementPdf, signTenant, signOwner };
+export { createFromRequest, myAgreements, myTenantAgreements, updateReminderDay, downloadAgreementPdf, signTenant, signOwner };

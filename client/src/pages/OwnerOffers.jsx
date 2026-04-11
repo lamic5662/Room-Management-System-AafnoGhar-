@@ -17,6 +17,7 @@ export default function OwnerOffers() {
   const [counterRent, setCounterRent] = useState("");
   const [ownerReply, setOwnerReply] = useState("Can you do this price?");
   const [sendingCounter, setSendingCounter] = useState(false);
+  const [showHistory, setShowHistory] = useState({});
 
   const load = async () => {
     try {
@@ -31,6 +32,17 @@ export default function OwnerOffers() {
   };
 
   useEffect(() => { load(); }, []);
+  useEffect(() => {
+    setShowHistory((prev) => {
+      const next = { ...prev };
+      offers.forEach((o) => {
+        if (o.status === "accepted" && next[o._id] === undefined) {
+          next[o._id] = true;
+        }
+      });
+      return next;
+    });
+  }, [offers]);
 
   const accept = async (id) => {
     try {
@@ -133,14 +145,36 @@ export default function OwnerOffers() {
                 <div className="spacer" />
                 <div className="muted" style={{ fontSize: 13, lineHeight: 1.7 }}>
                   {t("Listed rent")}: <b style={{ color: "#111827" }}>NPR {o.room?.monthlyRent}</b><br/>
-                  {t("Tenant offer")}: <b style={{ color: "#111827" }}>NPR {o.offeredRent}</b>
+                  {o.status === "accepted" ? t("Tenant final offer") : t("Tenant offer")}:{" "}
+                  <b style={{ color: "#111827" }}>NPR {o.acceptedRent || o.offeredRent}</b>
+                  {o.status === "accepted" && showHistory[o._id] && (
+                    <>
+                      <br/>
+                      {t("Original offer")}: <b style={{ color: "#111827" }}>NPR {o.offeredRent}</b>
+                    </>
+                  )}
                 </div>
+                {o.status === "accepted" && (
+                  <button
+                    type="button"
+                    className="btn btnOutline btnSm"
+                    style={{ marginTop: 8 }}
+                    onClick={() => setShowHistory((prev) => ({ ...prev, [o._id]: !prev[o._id] }))}
+                  >
+                    {showHistory[o._id] ? t("Hide history") : t("Show history")}
+                  </button>
+                )}
 
                 {o.status === "countered" ? (
                   <div className="muted" style={{ marginTop: 10, fontSize: 13 }}>
                     {t("Your counter")}: <b style={{ color: "#111827" }}>NPR {o.ownerCounterRent}</b>
                   </div>
                 ) : null}
+                {o.status === "accepted" && (
+                  <div className="muted" style={{ marginTop: 10, fontSize: 13 }}>
+                    {t("Accepted rent")}: <b style={{ color: "#111827" }}>NPR {o.acceptedRent || o.ownerCounterRent || o.offeredRent}</b>
+                  </div>
+                )}
 
                 {o.message ? (
                   <div className="muted" style={{ marginTop: 10, fontSize: 13 }}>
@@ -208,6 +242,12 @@ export default function OwnerOffers() {
         subtitle={t("Set your counter rent and message.")}
         onClose={() => setOpenCounter(false)}
       >
+        <div className="muted" style={{ fontSize: 13, lineHeight: 1.7 }}>
+          {t("Listed rent")}: <b style={{ color: "#111827" }}>NPR {selected?.room?.monthlyRent ?? "-"}</b><br/>
+          {t("Tenant offer")}: <b style={{ color: "#111827" }}>NPR {selected?.offeredRent ?? "-"}</b>
+        </div>
+
+        <div className="spacer" />
         <div className="muted" style={{ fontSize: 13 }}>{t("Counter rent (NPR)")}</div>
         <input className="input" value={counterRent} onChange={(e) => setCounterRent(e.target.value)} />
 

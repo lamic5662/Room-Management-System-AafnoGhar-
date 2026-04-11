@@ -52,4 +52,14 @@ const deleteRead = async (req, res) => {
   }
 };
 
-export { listMyNotifications, markRead, markAllRead, deleteRead };
+const deleteAllRead = async (req, res) => {
+  try {
+    const resDel = await Notification.deleteMany({ user: req.user._id, read: true });
+    res.json({ message: "Read notifications deleted", deleted: resDel.deletedCount || 0 });
+  } catch (err) {
+    console.log("Delete all read error:", err.message);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+export { listMyNotifications, markRead, markAllRead, deleteRead, deleteAllRead };

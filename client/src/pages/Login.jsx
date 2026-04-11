@@ -51,7 +51,7 @@ export default function Login() {
 
       const role = res.data.user?.role;
       setTimeout(() => {
-        if (role === "admin") navigate("/admin/dashboard");
+        if (role === "admin" || role === "super_admin" || role === "moderator") navigate("/admin/dashboard");
         else if (role === "owner") navigate("/owner/dashboard");
         else navigate("/rooms");
       }, 400);

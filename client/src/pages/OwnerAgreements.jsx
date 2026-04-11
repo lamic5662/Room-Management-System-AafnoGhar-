@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import http from "../api/http";
 import Spinner from "../components/Spinner";
-import Modal from "../components/Modal";
 import SignaturePad from "../components/SignaturePad";
 import { useToast } from "../context/ToastContext";
 import { getPhotoUrl } from "../utils/photo";
@@ -14,23 +14,26 @@ export default function OwnerAgreements() {
 
   const [loading, setLoading] = useState(true);
   const [items, setItems] = useState([]);
+  const [reminderDays, setReminderDays] = useState({});
+  const [savingReminderId, setSavingReminderId] = useState("");
 
   const [open, setOpen] = useState(false);
   const [selected, setSelected] = useState(null);
   const [sending, setSending] = useState(false);
-  const [billOpen, setBillOpen] = useState(false);
-  const [billAgreement, setBillAgreement] = useState(null);
-  const [billPeriod, setBillPeriod] = useState(new Date().toISOString().slice(0, 7));
-  const [billPrev, setBillPrev] = useState("");
-  const [billCurrent, setBillCurrent] = useState("");
-  const [billRate, setBillRate] = useState("");
-  const [billSending, setBillSending] = useState(false);
 
   const load = async () => {
     try {
       setLoading(true);
       const res = await http.get("/api/agreements/my");
-      setItems(res.data.agreements || []);
+      const list = res.data.agreements || [];
+      setItems(list);
+      setReminderDays(
+        list.reduce((acc, a) => {
+          const startDay = a.startDate ? new Date(a.startDate).getDate() : 1;
+          acc[a._id] = a.rentReminderDay || startDay;
+          return acc;
+        }, {})
+      );
     } catch (e) {
       showToast("error", e?.response?.data?.message || "Failed to load agreements");
     } finally {
@@ -70,40 +73,10 @@ export default function OwnerAgreements() {
     }
   };
 
-  const openBill = (a) => {
-    setBillAgreement(a);
-    setBillPeriod(new Date().toISOString().slice(0, 7));
-    setBillPrev("");
-    setBillCurrent("");
-    setBillRate("");
-    setBillOpen(true);
-  };
-
-  const createBill = async () => {
-    if (!billAgreement?._id) return;
-    if (!billPeriod) return showToast("error", t("Period is required"));
-    if (!billCurrent || Number(billCurrent) < 0) return showToast("error", t("Current reading is required"));
-    if (!billRate || Number(billRate) <= 0) return showToast("error", t("Unit rate is required"));
-    try {
-      setBillSending(true);
-      await http.post("/api/electricity", {
-        agreementId: billAgreement._id,
-        period: billPeriod,
-        currentReading: Number(billCurrent),
-        unitRate: Number(billRate),
-        previousReading: billPrev ? Number(billPrev) : undefined,
-      });
-      showToast("success", t("Electricity bill created ✅"));
-      setBillOpen(false);
-    } catch (e) {
-      showToast("error", e?.response?.data?.message || t("Failed to create bill"));
-    } finally {
-      setBillSending(false);
-    }
-  };
-
   const downloadPdf = async (agreementId) => {
     try {
+      const ok = window.confirm(t("Download agreement PDF?"));
+      if (!ok) return;
       const token = localStorage.getItem("token");
       const res = await fetch(`${API}/api/agreements/${agreementId}/pdf`, {
         headers: { Authorization: `Bearer ${token}` },
@@ -127,6 +100,26 @@ export default function OwnerAgreements() {
       window.URL.revokeObjectURL(url);
     } catch (e) {
       showToast("error", t("Download failed"));
+    }
+  };
+
+  const saveReminder = async (agreementId) => {
+    const day = Number(reminderDays[agreementId]);
+    if (!Number.isFinite(day) || day < 1 || day > 31) {
+      showToast("error", "Reminder day must be between 1 and 31");
+      return;
+    }
+    try {
+      setSavingReminderId(agreementId);
+      const res = await http.patch(`/api/agreements/${agreementId}/reminder`, { day });
+      showToast("success", res.data.message || "Reminder day updated ✅");
+      setItems((prev) =>
+        prev.map((a) => (a._id === agreementId ? { ...a, rentReminderDay: day } : a))
+      );
+    } catch (e) {
+      showToast("error", e?.response?.data?.message || "Failed to update reminder day");
+    } finally {
+      setSavingReminderId("");
     }
   };
 
@@ -190,15 +183,74 @@ export default function OwnerAgreements() {
 
               <div className="spacer" />
 
-              <div className="cardActions">
-                <button className="btn btnOutline" onClick={() => downloadPdf(a._id)}>
-                  ⬇ {t("Download PDF")}
+              <div className="row" style={{ justifyContent: "space-between", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
+                <div className="muted" style={{ fontSize: 13 }}>
+                  {t("Rent reminder day")}
+                </div>
+                <div className="row" style={{ gap: 8, alignItems: "center" }}>
+                  <select
+                    className="input"
+                    value={reminderDays[a._id] || 1}
+                    onChange={(e) =>
+                      setReminderDays((prev) => ({ ...prev, [a._id]: e.target.value }))
+                    }
+                    style={{ width: 100 }}
+                    disabled={a.status === "ended"}
+                  >
+                    {Array.from({ length: 31 }, (_, i) => i + 1).map((d) => (
+                      <option key={d} value={d}>
+                        {d}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    className="btn btnOutline"
+                    onClick={() => saveReminder(a._id)}
+                    disabled={a.status === "ended" || savingReminderId === a._id}
+                  >
+                    {savingReminderId === a._id ? t("Saving...") : t("Save")}
+                  </button>
+                </div>
+              </div>
+
+              <div className="spacer" />
+
+              <div className="agreementActions">
+                <Link
+                  className="btn btnOutline agreementIconBtn"
+                  to={`/owner/agreements/${a._id}/chat`}
+                  data-tip={t("Chat")}
+                  title={t("Chat")}
+                  aria-label={t("Chat")}
+                >
+                  💬
+                </Link>
+                <Link
+                  className="btn btnOutline agreementIconBtn"
+                  to={`/owner/agreements/${a._id}/timeline`}
+                  data-tip={t("Payment Timeline")}
+                  title={t("Payment Timeline")}
+                  aria-label={t("Payment Timeline")}
+                >
+                  📅
+                </Link>
+                <button
+                  className="btn agreementIconBtn"
+                  onClick={() => openSign(a)}
+                  data-tip={t("Upload Signature")}
+                  title={t("Upload Signature")}
+                  aria-label={t("Upload Signature")}
+                >
+                  ✍
                 </button>
-                <button className="btn btnOutline" onClick={() => openBill(a)}>
-                  ⚡ {t("Add Electricity Bill")}
-                </button>
-                <button className="btn" onClick={() => openSign(a)}>
-                  ✍ {t("Upload Signature")}
+                <button
+                  className="btn btnOutline agreementIconBtn"
+                  onClick={() => downloadPdf(a._id)}
+                  data-tip={t("Download PDF")}
+                  title={t("Download PDF")}
+                  aria-label={t("Download PDF")}
+                >
+                  ⬇
                 </button>
               </div>
             </div>
@@ -216,39 +268,6 @@ export default function OwnerAgreements() {
           uploadOwnerSignature(file);
         }}
       />
-
-      <Modal
-        open={billOpen}
-        title={t("Create Electricity Bill")}
-        subtitle={t("Enter meter reading and unit rate for this period.")}
-        onClose={() => setBillOpen(false)}
-      >
-        <label className="muted" style={{ fontSize: 13 }}>{t("Period (YYYY-MM)")}</label>
-        <input className="input" value={billPeriod} onChange={(e) => setBillPeriod(e.target.value)} placeholder={t("2026-01")} />
-
-        <div className="spacer" />
-
-        <label className="muted" style={{ fontSize: 13 }}>{t("Previous Reading (optional)")}</label>
-        <input className="input" value={billPrev} onChange={(e) => setBillPrev(e.target.value)} placeholder={t("e.g. 1200")} />
-
-        <div className="spacer" />
-
-        <label className="muted" style={{ fontSize: 13 }}>{t("Current Reading")}</label>
-        <input className="input" value={billCurrent} onChange={(e) => setBillCurrent(e.target.value)} placeholder={t("e.g. 1255")} />
-
-        <div className="spacer" />
-
-        <label className="muted" style={{ fontSize: 13 }}>{t("Unit Rate (NPR)")}</label>
-        <input className="input" value={billRate} onChange={(e) => setBillRate(e.target.value)} placeholder={t("e.g. 12")} />
-
-        <div className="spacer" />
-        <div className="row" style={{ justifyContent: "flex-end" }}>
-          <button className="btn btnOutline" onClick={() => setBillOpen(false)}>{t("Cancel")}</button>
-          <button className="btn" onClick={createBill} disabled={billSending}>
-            {billSending ? t("Saving...") : t("Create Bill")}
-          </button>
-        </div>
-      </Modal>
     </div>
   );
 }

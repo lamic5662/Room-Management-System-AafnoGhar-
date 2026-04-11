@@ -8,6 +8,8 @@ import {
   ownerRejectExit,
   ownerSettleExit,
   ownerPurgeExitData,
+  tenantPurgeExitData,
+  generateExitSummaryPdf,
 } from "../controllers/exit.controller.js";
 
 const router = Router();
@@ -20,6 +22,8 @@ router.get("/incoming", protect, ownerIncomingExitRequests);
 router.patch("/:id/approve", protect, ownerApproveExit);
 router.patch("/:id/reject", protect, ownerRejectExit);
 router.patch("/:id/settle", protect, ownerSettleExit);
+router.get("/:id/summary-pdf", protect, generateExitSummaryPdf);
 router.delete("/:id/purge", protect, ownerPurgeExitData);
+router.delete("/:id/tenant-purge", protect, tenantPurgeExitData);
 
 export default router;

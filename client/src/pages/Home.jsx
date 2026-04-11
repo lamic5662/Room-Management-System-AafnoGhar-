@@ -5,6 +5,7 @@ import Spinner from "../components/Spinner";
 import { useToast } from "../context/ToastContext";
 import { getPhotoUrl } from "../utils/photo";
 import { useI18n } from "../context/I18nContext";
+import heroBg from "../../bg.avif";
 
 export default function Home() {
   const navigate = useNavigate();
@@ -41,7 +42,15 @@ export default function Home() {
   };
 
   return (
-    <div className="homeWrap">
+    <div
+      className="homeWrap"
+      style={{
+        backgroundImage: `linear-gradient(180deg, rgba(248,250,252,0.9), rgba(248,250,252,0.98)), url(${heroBg})`,
+        backgroundSize: "cover",
+        backgroundPosition: "center",
+        backgroundRepeat: "no-repeat",
+      }}
+    >
       <section className="homeHero">
         <div className="heroGrid">
           <div className="heroCopy">
@@ -168,10 +177,22 @@ export default function Home() {
         ) : featured.length === 0 ? (
           <div className="card cardPad">{t("No featured rooms yet.")}</div>
         ) : (
-          <div className="featuredGrid">
+          <div className="featuredGrid featuredScroll">
             {featured.map((r) => {
               const img = r.photos?.[0] ? getPhotoUrl(r.photos[0]) : "";
               const isVerified = r.isVerifiedOwner ?? (r.owner?.kyc?.status === "approved");
+              const isFastResponder = r.isFastResponder ?? (r.owner?.responseStats?.fastResponder);
+              const responseCount = r.owner?.responseStats?.count ?? 0;
+              const responseAvg = r.owner?.responseStats?.avgMinutes ?? 0;
+              const formatResponseMinutes = (mins) => {
+                if (!Number.isFinite(mins) || mins <= 0) return null;
+                if (mins < 60) return `${mins} ${t("min")}`;
+                const hours = Math.floor(mins / 60);
+                const remaining = mins % 60;
+                if (remaining === 0) return `${hours} ${t("hr")}`;
+                return `${hours} ${t("hr")} ${remaining} ${t("min")}`;
+              };
+              const responseText = formatResponseMinutes(responseAvg);
 
               return (
                 <Link key={r._id} to={`/rooms/${r._id}`} className="roomCard card">
@@ -186,6 +207,11 @@ export default function Home() {
                     <div className="muted roomLoc">{r.location}</div>
 
                     <div className="roomBadges">
+                      {isFastResponder ? <span className="badge badgeFast">⚡ {t("Fast Responder")}</span> : null}
+                      {responseText ? (
+                        <span className="badge">{t("Avg Response Time")}: {responseText}</span>
+                      ) : null}
+                      {responseCount > 0 ? <span className="badge">{t("Responses")}: {responseCount}</span> : null}
                       {r.facilities?.wifi && <span className="badge">{t("WiFi")}</span>}
                       {r.facilities?.parking && <span className="badge">{t("Parking")}</span>}
                       {r.facilities?.waterSupply && <span className="badge">{t("Water")}</span>}

@@ -6,8 +6,8 @@ const userSchema = new mongoose.Schema(
         email: { type: String, required: true, unique: true, lowercase: true, trim: true },
         phone: { type: String, required: true, unique: true, trim: true },
 
-        // owner / tenant / admin
-        role: { type: String, enum: ["owner", "tenant", "admin"], required: true },
+        // owner / tenant / admin / moderator / super_admin
+        role: { type: String, enum: ["owner", "tenant", "admin", "moderator", "super_admin"], required: true },
 
         kyc: {
             status: {
@@ -35,12 +35,40 @@ const userSchema = new mongoose.Schema(
             checkedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
             checkedAt: { type: Date },
             submittedAt: { type: Date },
+            resubmitted: { type: Boolean, default: false },
+            history: [
+                {
+                    action: { type: String, enum: ["submitted", "updated"], required: true },
+                    actor: {
+                        id: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+                        role: { type: String, enum: ["owner", "tenant", "admin", "moderator", "super_admin"] },
+                        name: { type: String, trim: true },
+                    },
+                    docType: {
+                        type: String,
+                        enum: ["citizenship", "house_paper", "college_id", "job_id", "other"],
+                    },
+                    fields: { type: mongoose.Schema.Types.Mixed, default: {} },
+                    attachments: {
+                        front: { type: Boolean, default: false },
+                        back: { type: Boolean, default: false },
+                        selfie: { type: Boolean, default: false },
+                    },
+                    createdAt: { type: Date, default: Date.now },
+                },
+            ],
         },
 
         password: { type: String, required: true, minlength: 6 },
         avatarUrl: { type: String, default: "" },
         resetPasswordToken: { type: String, default: "" },
         resetPasswordExpires: { type: Date },
+        responseStats: {
+            count: { type: Number, default: 0 },
+            avgMinutes: { type: Number, default: 0 },
+            lastResponseAt: { type: Date, default: null },
+            fastResponder: { type: Boolean, default: false },
+        },
     },
     { timestamps: true }
 );

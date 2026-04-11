@@ -10,6 +10,7 @@ import {
     myRooms,
     uploadPhotos,
     updateRoom,
+    rateRoom,
     deleteRoomPhoto,
     publishRoom,
     unpublishRoom,
@@ -30,6 +31,7 @@ router.get("/my", protect, myRooms);
 router.patch("/:id/publish", protect, requireVerifiedOwner, publishRoom);
 router.patch("/:id/unpublish", protect, unpublishRoom);
 router.get("/:id", getRoomById);
+router.post("/:id/rate", protect, rateRoom);
 router.post("/:id/photos", protect, (req, res) => {
     uploadRoomPhotos(req, res, async (err) => {
         if (err) return res.status(400).json({ message: err.message });

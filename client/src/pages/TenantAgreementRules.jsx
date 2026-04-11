@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useParams } from "react-router-dom";
 import http from "../api/http";
 import Spinner from "../components/Spinner";
 import { useToast } from "../context/ToastContext";
@@ -33,7 +33,6 @@ export default function TenantAgreementRules() {
           <h1 className="h1">Rules & Regulations</h1>
           <p className="muted" style={{ marginTop: 6 }}>Follow these rules during your stay.</p>
         </div>
-        <Link className="btn btnOutline" to="/tenant/agreements">Back</Link>
       </div>
 
       <div className="spacer" />

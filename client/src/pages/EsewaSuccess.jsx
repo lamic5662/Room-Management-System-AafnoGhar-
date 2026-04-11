@@ -5,6 +5,7 @@ import http from "../api/http";
 export default function EsewaSuccess() {
   const [params] = useSearchParams();
   const [msg, setMsg] = useState("Verifying payment...");
+  const [status, setStatus] = useState("pending");
 
   useEffect(() => {
     const paymentId = params.get("paymentId");
@@ -12,10 +13,24 @@ export default function EsewaSuccess() {
 
     (async () => {
       try {
+        if (!paymentId || !data) {
+          setStatus("failed");
+          setMsg("Missing payment data. Your payment was not completed.");
+          return;
+        }
         const res = await http.post("/api/esewa/verify", { paymentId, data });
+        setStatus("success");
         setMsg(res.data.message || "Payment verified");
       } catch (e) {
-        setMsg(e?.response?.data?.message || "Verification failed");
+        const raw = e?.response?.data?.message || "Verification failed";
+        if (raw === "eSewa status URL missing") {
+          setMsg("Verification service is unavailable. Please try again later.");
+        } else if (raw === "Payment not complete") {
+          setMsg("Payment was not completed. No amount was charged.");
+        } else {
+          setMsg(raw);
+        }
+        setStatus("failed");
       }
     })();
   }, [params]);
@@ -28,7 +43,11 @@ export default function EsewaSuccess() {
         <p className="muted" style={{ marginTop: 6 }}>{msg}</p>
         <div className="spacer" />
         <div className="row" style={{ justifyContent: "center" }}>
-          <Link className="btn" to="/tenant/payments">My Payments</Link>
+          {status === "success" ? (
+            <Link className="btn" to="/tenant/payments">My Payments</Link>
+          ) : (
+            <Link className="btn" to="/tenant/agreements">Try Again</Link>
+          )}
           <Link className="btn btnOutline" to="/tenant/agreements">Agreements</Link>
         </div>
       </div>

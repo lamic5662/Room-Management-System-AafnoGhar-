@@ -17,6 +17,7 @@ import ProtectedRoute from "./components/ProtectedRoute";
 import useAuthCheck from "./hooks/useAuthCheck";
 import Navbar from "./components/Navbar";
 import Footer from "./components/Footer";
+import ChatWidget from "./components/ChatWidget";
 import NotFound from "./pages/NotFound";
 import OwnerRequests from "./pages/OwnerRequests";
 import OwnerAgreements from "./pages/OwnerAgreements";
@@ -27,6 +28,7 @@ import TenantPayments from "./pages/TenantPayments";
 import TenantComplaints from "./pages/TenantComplaints";
 import OwnerComplaints from "./pages/OwnerComplaints";
 import AdminUsers from "./pages/AdminUsers";
+import AdminAuditLogs from "./pages/AdminAuditLogs";
 import OwnerRoomRules from "./pages/OwnerRoomRules";
 import TenantAgreementRules from "./pages/TenantAgreementRules";
 import TenantExits from "./pages/TenantExits";
@@ -41,6 +43,12 @@ import KhaltiReturn from "./pages/KhaltiReturn";
 import Profile from "./pages/Profile";
 import ForgotPassword from "./pages/ForgotPassword";
 import ResetPassword from "./pages/ResetPassword";
+import DailyRent from "./pages/DailyRent";
+import TenantSavedSearches from "./pages/TenantSavedSearches";
+import TenantVisits from "./pages/TenantVisits";
+import OwnerVisits from "./pages/OwnerVisits";
+import PaymentTimeline from "./pages/PaymentTimeline";
+import AgreementChat from "./pages/AgreementChat";
 
 export default function App() {
   const checking = useAuthCheck();
@@ -55,11 +63,17 @@ export default function App() {
           <Route path="/" element={<Home />} />
           <Route path="/rooms" element={<Rooms />} />
           <Route path="/rooms/:id" element={<RoomDetails />} />
-          <Route element={<ProtectedRoute allowedRoles={["admin"]} />}>
+          <Route path="/daily-rent" element={<DailyRent />} />
+          <Route element={<ProtectedRoute allowedRoles={["admin", "super_admin", "moderator"]} />}>
             <Route path="/admin/dashboard" element={<AdminDashboard />} />
-            <Route path="/admin/kyc" element={<AdminKyc />} />
-            <Route path="/admin/users" element={<AdminUsers />} />
             <Route path="/admin/flagged-rooms" element={<AdminFlaggedRooms />} />
+          </Route>
+          <Route element={<ProtectedRoute allowedRoles={["admin", "super_admin"]} />}>
+            <Route path="/admin/kyc" element={<AdminKyc />} />
+          </Route>
+          <Route element={<ProtectedRoute allowedRoles={["super_admin"]} />}>
+            <Route path="/admin/users" element={<AdminUsers />} />
+            <Route path="/admin/audit-logs" element={<AdminAuditLogs />} />
           </Route>
 
           <Route element={<ProtectedRoute allowedRoles={["owner"]} />}>
@@ -73,8 +87,11 @@ export default function App() {
             <Route path="/owner/payments" element={<OwnerPayments />} />
             <Route path="/owner/complaints" element={<OwnerComplaints />} />
             <Route path="/owner/exits" element={<OwnerExits />} />
+            <Route path="/owner/visits" element={<OwnerVisits />} />
             <Route path="/owner/rooms/:roomId/rules" element={<OwnerRoomRules />} />
             <Route path="/owner/rooms/:id/edit" element={<EditRoom />} />
+            <Route path="/owner/agreements/:agreementId/timeline" element={<PaymentTimeline />} />
+            <Route path="/owner/agreements/:agreementId/chat" element={<AgreementChat />} />
           </Route>
 
           <Route element={<ProtectedRoute allowedRoles={["tenant"]} />}>
@@ -88,9 +105,13 @@ export default function App() {
             <Route path="/tenant/complaints" element={<TenantComplaints />} />
             <Route path="/tenant/exits" element={<TenantExits />} />
             <Route path="/tenant/agreements/:agreementId/rules" element={<TenantAgreementRules />} />
+            <Route path="/tenant/agreements/:agreementId/timeline" element={<PaymentTimeline />} />
+            <Route path="/tenant/agreements/:agreementId/chat" element={<AgreementChat />} />
+            <Route path="/tenant/saved-searches" element={<TenantSavedSearches />} />
+            <Route path="/tenant/visits" element={<TenantVisits />} />
           </Route>
 
-          <Route element={<ProtectedRoute allowedRoles={["tenant", "owner", "admin"]} />}>
+          <Route element={<ProtectedRoute allowedRoles={["tenant", "owner", "admin", "super_admin", "moderator"]} />}>
             <Route path="/profile" element={<Profile />} />
           </Route>
           <Route path="/login" element={<Login />} />
@@ -104,6 +125,7 @@ export default function App() {
         </Routes>
       </div>
       <Footer />
+      <ChatWidget />
     </>
   );
 }

@@ -25,6 +25,21 @@ async function evaluateRoomFraud(room) {
   const count24h = await Room.countDocuments({ owner: room.owner, createdAt: { $gte: since } });
   if (count24h > 5) { flags.push("too_many_posts_today"); score += 20; }
 
+  const normalizeText = (value) => String(value || "").replace(/[^a-z0-9\u0900-\u097F]+/gi, " ").trim();
+  const textLength = (value) => normalizeText(value).replace(/\s+/g, "").length;
+  const vowelRatio = (word) => {
+    const letters = String(word || "").toLowerCase().match(/[a-z]/g) || [];
+    if (!letters.length) return 1;
+    const vowels = letters.filter((ch) => /[aeiou]/.test(ch)).length;
+    return vowels / letters.length;
+  };
+
+  const titleLen = textLength(room.title);
+  if (titleLen > 0 && titleLen < 3) { flags.push("title_too_short"); score += 25; }
+
+  const descLen = textLength(room.description);
+  if (descLen > 0 && descLen < 10) { flags.push("description_too_short"); score += 25; }
+
   if (room.title) {
     const sameTitleCount = await Room.countDocuments({ owner: room.owner, title: room.title });
     if (sameTitleCount > 2) { flags.push("repeated_title"); score += 10; }
@@ -40,6 +55,10 @@ async function evaluateRoomFraud(room) {
       }
       if (randomWords.length) {
         flags.push("random_title_words");
+        score += 15;
+      }
+      if (words.length === 1 && words[0].length >= 8 && vowelRatio(words[0]) < 0.3) {
+        flags.push("title_low_vowel_ratio");
         score += 15;
       }
     }

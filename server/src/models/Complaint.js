@@ -10,6 +10,16 @@ const complaintSchema = new mongoose.Schema(
 
         title: { type: String, required: true, trim: true },
         description: { type: String, required: true, trim: true },
+        category: {
+            type: String,
+            enum: ["plumbing", "electrical", "internet", "cleaning", "structural", "other"],
+            default: "other",
+        },
+        priority: {
+            type: String,
+            enum: ["low", "medium", "high", "urgent"],
+            default: "medium",
+        },
 
         status: {
             type: String,

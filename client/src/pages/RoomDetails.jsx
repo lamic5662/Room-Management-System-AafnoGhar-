@@ -10,6 +10,9 @@ import L from "leaflet";
 import markerIcon from "leaflet/dist/images/marker-icon.png";
 import markerShadow from "leaflet/dist/images/marker-shadow.png";
 import { useI18n } from "../context/I18nContext";
+import { formatRoomLocation } from "../utils/roomLocation";
+import NearbyList from "../components/NearbyList";
+import { hasNearbyEntries } from "../utils/nearby";
 
 export default function RoomDetails() {
   const { id } = useParams();
@@ -27,6 +30,10 @@ export default function RoomDetails() {
   const [userPos, setUserPos] = useState(null);
   const [nearby, setNearby] = useState(null);
   const [nearbyLoading, setNearbyLoading] = useState(false);
+  const [ratingScore, setRatingScore] = useState(0);
+  const [ratingComment, setRatingComment] = useState("");
+  const [ratingSubmitting, setRatingSubmitting] = useState(false);
+  const [ratingThanks, setRatingThanks] = useState(false);
 
   // gallery
   const [activeImg, setActiveImg] = useState(0);
@@ -42,25 +49,50 @@ export default function RoomDetails() {
   const [offeredRent, setOfferedRent] = useState("");
   const [offerMessage, setOfferMessage] = useState("Hi, I am interested. Can we finalize this price?");
   const [sendingOffer, setSendingOffer] = useState(false);
+  // visit modal
+  const [openVisit, setOpenVisit] = useState(false);
+  const [visitAt, setVisitAt] = useState("");
+  const [visitNote, setVisitNote] = useState("");
+  const [sendingVisit, setSendingVisit] = useState(false);
   const [suggestion, setSuggestion] = useState(null);
   const [showMap, setShowMap] = useState(false);
   const [selectedNearby, setSelectedNearby] = useState(null);
+  const minVisitAt = useMemo(() => {
+    const d = new Date();
+    const pad = (n) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  }, []);
+
+  const formatResponseMinutes = (mins) => {
+    if (!Number.isFinite(mins) || mins <= 0) return "—";
+    if (mins < 60) return `${mins} ${t("min")}`;
+    const hours = Math.floor(mins / 60);
+    const remaining = mins % 60;
+    if (remaining === 0) return `${hours} ${t("hr")}`;
+    return `${hours} ${t("hr")} ${remaining} ${t("min")}`;
+  };
+
+  const fetchRoomDetails = async () => {
+    const res = await http.get(`/api/rooms/${id}`);
+    const r = res.data.room;
+    setRoom(r);
+    if (r?.nearby) {
+      setNearby({
+        hospitals: (r.nearby.hospitals || []).map((n) => ({ name: n, distance: null, lat: null, lng: null })),
+        colleges: (r.nearby.colleges || []).map((n) => ({ name: n, distance: null, lat: null, lng: null })),
+        busStops: (r.nearby.busStops || []).map((n) => ({ name: n, distance: null, lat: null, lng: null })),
+        markets: (r.nearby.markets || []).map((n) => ({ name: n, distance: null, lat: null, lng: null })),
+      });
+    } else {
+      setNearby(null);
+    }
+    setActiveImg(0);
+  };
 
   const load = async () => {
     try {
       setLoading(true);
-      const res = await http.get(`/api/rooms/${id}`);
-      const r = res.data.room;
-      setRoom(r);
-      if (r?.nearby) {
-        setNearby({
-          hospitals: (r.nearby.hospitals || []).map((n) => ({ name: n, distance: null, lat: null, lng: null })),
-          colleges: (r.nearby.colleges || []).map((n) => ({ name: n, distance: null, lat: null, lng: null })),
-          busStops: (r.nearby.busStops || []).map((n) => ({ name: n, distance: null, lat: null, lng: null })),
-          markets: (r.nearby.markets || []).map((n) => ({ name: n, distance: null, lat: null, lng: null })),
-        });
-      }
-      setActiveImg(0);
+      await fetchRoomDetails();
     } catch (e) {
       showToast("error", e?.response?.data?.message || "Failed to load room");
     } finally {
@@ -126,17 +158,26 @@ export default function RoomDetails() {
   useEffect(() => {
     if (!room?._id) return;
     if (!room?.geo?.lat || !room?.geo?.lng) return;
+    const fallbackHasNearby = hasNearbyEntries(room?.nearby);
+
     const fetchNearby = async () => {
       try {
         setNearbyLoading(true);
         const res = await http.get(`/api/rooms/${room._id}/nearby`);
-        setNearby(res.data);
+        if (hasNearbyEntries(res.data)) {
+          setNearby(res.data);
+        } else if (!fallbackHasNearby) {
+          setNearby(null);
+        }
       } catch {
-        setNearby(null);
+        if (!fallbackHasNearby) {
+          setNearby(null);
+        }
       } finally {
         setNearbyLoading(false);
       }
     };
+
     fetchNearby();
   }, [room?._id, room?.geo?.lat, room?.geo?.lng]);
 
@@ -199,6 +240,9 @@ export default function RoomDetails() {
     .map((p) => getPhotoUrl(p))
     .filter(Boolean);
   const totalPhotos = photos.length;
+  const ratingAverage = Number(room?.ratingAvg ?? 0);
+  const ratingCount = room?.ratingCount || 0;
+  const recentRatings = (room?.ratings || []).slice(0, 3);
 
   useEffect(() => {
     if (!totalPhotos) return;
@@ -206,6 +250,7 @@ export default function RoomDetails() {
   }, [totalPhotos, activeImg]);
 
   const canRequest = !!token && isTenant && tenantVerified;
+  const canRate = !!token && isTenant && tenantVerified && room?.canRate;
 
   const submitRequest = async () => {
     if (!canRequest) return;
@@ -220,6 +265,48 @@ export default function RoomDetails() {
       showToast("error", e?.response?.data?.message || "Failed to send request");
     } finally {
       setSending(false);
+    }
+  };
+
+  const userRating = useMemo(() => {
+    if (!room || !room.ratings || !user?._id) return null;
+    return room.ratings.find((r) => String(r.user?._id || r.user) === String(user._id)) || null;
+  }, [room, user?._id]);
+
+  useEffect(() => {
+    if (!userRating) {
+      setRatingScore(0);
+      setRatingComment("");
+      return;
+    }
+    setRatingScore(userRating.score || 0);
+    setRatingComment(userRating.comment || "");
+  }, [userRating]);
+
+  const submitRating = async () => {
+    if (!canRate) {
+      if (isTenant && tenantVerified && room && !room.canRate) {
+        showToast("error", t("Complete your exit before rating this room."));
+      } else {
+        showToast("error", t("Log in as tenant to leave a rating."));
+      }
+      return;
+    }
+    if (!ratingScore) {
+      showToast("error", t("Please select a rating before submitting."));
+      return;
+    }
+    try {
+      setRatingSubmitting(true);
+      await http.post(`/api/rooms/${id}/rate`, { score: ratingScore, comment: ratingComment });
+      showToast("success", t("Rating saved."));
+      setRatingThanks(true);
+      window.setTimeout(() => setRatingThanks(false), 3500);
+      await fetchRoomDetails();
+    } catch (e) {
+      showToast("error", e?.response?.data?.message || t("Failed to save rating."));
+    } finally {
+      setRatingSubmitting(false);
     }
   };
 
@@ -242,6 +329,27 @@ export default function RoomDetails() {
     }
   };
 
+  const submitVisit = async () => {
+    if (!canRequest) return;
+    if (!visitAt) return showToast("error", t("Please select a visit time."));
+    try {
+      setSendingVisit(true);
+      await http.post("/api/visits", {
+        roomId: room._id,
+        scheduledAt: visitAt,
+        note: visitNote,
+      });
+      showToast("success", t("Visit scheduled ✅"));
+      setOpenVisit(false);
+      setVisitAt("");
+      setVisitNote("");
+    } catch (e) {
+      showToast("error", e?.response?.data?.message || t("Failed to schedule visit"));
+    } finally {
+      setSendingVisit(false);
+    }
+  };
+
   if (loading) return <Spinner text={t("Loading room...")} />;
 
   if (!room) {
@@ -258,7 +366,9 @@ export default function RoomDetails() {
         <div>
           <h1 className="h1">{room.title}</h1>
           <div className="row" style={{ gap: 8, flexWrap: "wrap", marginTop: 6 }}>
-            <div className="muted">{room.location}</div>
+            <div className="muted">
+              {formatRoomLocation(room.location, room.geo) || t("Location not provided")}
+            </div>
             {room.geo?.lat && room.geo?.lng ? (
               <button
                 type="button"
@@ -348,7 +458,7 @@ export default function RoomDetails() {
 
         {/* RIGHT: Info + CTA */}
         <div style={{ display: "grid", gap: 14 }}>
-          <div className="card cardPad">
+          <div className="card cardPad" id="ratings">
             <div className="row" style={{ justifyContent: "space-between", alignItems: "flex-start" }}>
               <div>
                 <div style={{ fontWeight: 900, fontSize: 16 }}>{t("Details")}</div>
@@ -380,6 +490,106 @@ export default function RoomDetails() {
             ) : null}
           </div>
 
+          <div className="card cardPad" id="ratings">
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16 }}>
+              <div>
+                <div style={{ fontWeight: 900, fontSize: 16 }}>{t("Ratings")}</div>
+                <div className="muted" style={{ fontSize: 13, marginTop: 4 }}>
+                  {ratingCount ? `${ratingCount} ${t("ratings")}` : t("No ratings yet.")}
+                </div>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                <div style={{ fontSize: 24, fontWeight: 800 }}>{ratingAverage ? ratingAverage.toFixed(1) : "0.0"}</div>
+                <div className="ratingStars">
+                  {[1, 2, 3, 4, 5].map((value) => (
+                    <span
+                      key={`rating-star-${value}`}
+                      style={{ color: value <= Math.round(ratingAverage) ? "#fcd34d" : "#e5e7eb" }}
+                    >
+                      ★
+                    </span>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {recentRatings.length ? (
+              <div className="ratingList">
+                {recentRatings.map((entry) => (
+                  <div key={`${entry.user?._id || entry.user}-${entry.createdAt}`} className="ratingItem">
+                    <div className="row" style={{ justifyContent: "space-between" }}>
+                      <div style={{ fontWeight: 700 }}>{entry.user?.fullName || t("Unidentified user")}</div>
+                      <div className="muted" style={{ fontSize: 12 }}>
+                        {entry.score}/5 • {new Date(entry.createdAt).toLocaleDateString()}
+                      </div>
+                    </div>
+                    {entry.comment ? (
+                      <div className="muted" style={{ marginTop: 6, fontSize: 13 }}>
+                        {entry.comment}
+                      </div>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            ) : null}
+
+            <div className="spacer" />
+            {canRate ? (
+              <>
+                <div className="ratingSelect">
+                  <div style={{ fontWeight: 600, marginBottom: 6 }}>{t("Leave your rating")}</div>
+                  <div className="row" style={{ flexWrap: "wrap", gap: 6 }}>
+                    {[1, 2, 3, 4, 5].map((value) => (
+                      <button
+                        key={`rating-select-${value}`}
+                        className={`pill ${ratingScore >= value ? "pillOk" : ""}`}
+                        type="button"
+                        style={{ padding: "4px 10px" }}
+                        onClick={() => {
+                          setRatingScore(value);
+                          if (ratingThanks) setRatingThanks(false);
+                        }}
+                      >
+                        {value} ★
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <textarea
+                  className="input"
+                  rows={3}
+                  value={ratingComment}
+                  onChange={(e) => {
+                    setRatingComment(e.target.value);
+                    if (ratingThanks) setRatingThanks(false);
+                  }}
+                  placeholder={t("Tell others what you liked")}
+                />
+                <div className="row" style={{ justifyContent: "flex-end" }}>
+                  <button
+                    type="button"
+                    className="btn"
+                    onClick={submitRating}
+                    disabled={ratingSubmitting}
+                  >
+                    {ratingSubmitting ? t("Saving...") : t("Submit rating")}
+                  </button>
+                </div>
+                {ratingThanks && (
+                  <div className="muted" style={{ marginTop: 8, fontSize: 13, color: "#059669", fontWeight: 600 }}>
+                    {t("Thanks for your review!")}
+                  </div>
+                )}
+              </>
+            ) : (
+              <div className="muted" style={{ fontSize: 13 }}>
+                {isTenant && tenantVerified
+                  ? t("Complete your exit before rating this room.")
+                  : t("Log in as tenant to leave a rating.")}
+              </div>
+            )}
+          </div>
+
           {suggestion && suggestion.recommended > 0 ? (
             <div className="card cardPad">
               <div style={{ fontWeight: 900, fontSize: 16 }}>{t("Market Suggestion")}</div>
@@ -400,6 +610,19 @@ export default function RoomDetails() {
             <div style={{ fontWeight: 900, fontSize: 16 }}>{t("Owner")}</div>
             <div className="muted" style={{ marginTop: 6, fontSize: 13 }}>
               {room.owner?.fullName || t("Owner")} • {room.owner?.phone || t("Phone hidden")}
+            </div>
+            <div className="row" style={{ marginTop: 8, gap: 8, flexWrap: "wrap" }}>
+              {room.owner?.responseStats?.fastResponder ? (
+                <span className="badge badgeFast">⚡ {t("Fast Responder")}</span>
+              ) : null}
+              {(room.owner?.responseStats?.count || 0) > 0 ? (
+                <span className="badge">
+                  {t("Avg Response Time")}: {formatResponseMinutes(room.owner?.responseStats?.avgMinutes)}
+                </span>
+              ) : null}
+              {(room.owner?.responseStats?.count || 0) > 0 ? (
+                <span className="badge">{t("Responses")}: {room.owner?.responseStats?.count}</span>
+              ) : null}
             </div>
 
             <div className="spacer" />
@@ -424,8 +647,7 @@ export default function RoomDetails() {
                 </Link>
               </div>
             ) : (
-              <div className="row" style={{ justifyContent: "space-between", flexWrap: "wrap" }}>
-                <button className="btn btnOutline" onClick={() => navigate("/rooms")}>{t("Back")}</button>
+              <div className="row" style={{ justifyContent: "flex-end", flexWrap: "wrap" }}>
                 <div className="row">
                   <button
                     className="btn btnOutline"
@@ -436,6 +658,9 @@ export default function RoomDetails() {
                     disabled={!tenantVerified}
                   >
                     {t("Make Offer")}
+                  </button>
+                  <button className="btn btnOutline" onClick={() => setOpenVisit(true)}>
+                    {t("Schedule Visit")}
                   </button>
                   <button className="btn" onClick={() => setOpen(true)}>{t("Send Request")}</button>
                 </div>
@@ -456,6 +681,7 @@ export default function RoomDetails() {
                   zoom={16}
                   className="mapContainer"
                   scrollWheelZoom={false}
+                  zoomControl={false}
                 >
                   <MapFocus
                     center={[room.geo.lat, room.geo.lng]}
@@ -470,18 +696,29 @@ export default function RoomDetails() {
                   {nearbyPoints.map((p, idx) => (
                     <Marker key={`${p.name}-${idx}`} position={[p.lat, p.lng]} />
                   ))}
+                  <MapZoomControls />
                 </MapContainer>
               </div>
               {nearbyPoints.length > 0 ? (
                 <div className="spacer" />
               ) : null}
-              {nearbyPoints.length > 0 ? (
-                <div className="row" style={{ justifyContent: "flex-end" }}>
-                  <button className="pill" onClick={() => setSelectedNearby(null)}>
-                    {t("Show All Pins")}
-                  </button>
-                </div>
-              ) : null}
+              <div className="row" style={{ justifyContent: "flex-end", gap: 8 }}>
+                <button className="pill" onClick={() => setSelectedNearby(null)} disabled={!nearbyPoints.length}>
+                  {t("Show All Pins")}
+                </button>
+                <button
+                  className="pill"
+                  onClick={() =>
+                    setSelectedNearby({
+                      name: room.title || t("Room location"),
+                      lat: room.geo.lat,
+                      lng: room.geo.lng,
+                    })
+                  }
+                >
+                  {t("Pin room location")}
+                </button>
+              </div>
             </div>
           ) : null}
 
@@ -559,6 +796,40 @@ export default function RoomDetails() {
         </div>
       </Modal>
 
+      <Modal
+        open={openVisit}
+        title={t("Schedule Visit")}
+        subtitle={t("Select date & time for the visit.")}
+        onClose={() => setOpenVisit(false)}
+      >
+        <div className="muted" style={{ fontSize: 13 }}>{t("Visit time")}</div>
+        <input
+          type="datetime-local"
+          className="input"
+          value={visitAt}
+          onChange={(e) => setVisitAt(e.target.value)}
+          min={minVisitAt}
+        />
+
+        <div className="spacer" />
+        <div className="muted" style={{ fontSize: 13 }}>{t("Visit note (optional)")}</div>
+        <textarea
+          className="input"
+          value={visitNote}
+          onChange={(e) => setVisitNote(e.target.value)}
+          placeholder={t("e.g. I can visit after 5 PM")}
+          style={{ minHeight: 90, paddingTop: 12 }}
+        />
+
+        <div className="spacer" />
+        <div className="row" style={{ justifyContent: "flex-end" }}>
+          <button className="btn btnOutline" onClick={() => setOpenVisit(false)}>{t("Cancel")}</button>
+          <button className="btn" onClick={submitVisit} disabled={sendingVisit}>
+            {sendingVisit ? t("Saving...") : t("Schedule")}
+          </button>
+        </div>
+      </Modal>
+
       {/* Image Viewer */}
       {viewerOpen && photos.length ? (
         <div className="modalBg" onMouseDown={() => setViewerOpen(false)}>
@@ -576,43 +847,6 @@ export default function RoomDetails() {
           </div>
         </div>
       ) : null}
-    </div>
-  );
-}
-
-function NearbyList({ title, items, onPin }) {
-  if (!items || items.length === 0) {
-    return (
-      <div className="muted" style={{ fontSize: 13 }}>
-        {title}: not found
-      </div>
-    );
-  }
-  return (
-    <div>
-      <div style={{ fontWeight: 900, fontSize: 13 }}>{title}</div>
-      <div style={{ display: "grid", gap: 6 }}>
-        {items.slice(0, 6).map((i, idx) => {
-          const canPin = Number.isFinite(i.lat) && Number.isFinite(i.lng);
-          return (
-            <div key={`${i.name}-${idx}`} className="muted" style={{ fontSize: 13, lineHeight: 1.6 }}>
-              <span>{i.name}{i.distance ? ` • ${i.distance}m` : ""}</span>
-              {onPin ? (
-                <button
-                  type="button"
-                  className={"pill " + (canPin ? "" : "muted")}
-                  onClick={() => canPin && onPin({ name: i.name, lat: i.lat, lng: i.lng })}
-                  style={{ marginLeft: 8, padding: "2px 8px" }}
-                  disabled={!canPin}
-                  title={canPin ? "Pin on map" : "No coordinates"}
-                >
-                  📍
-                </button>
-              ) : null}
-            </div>
-          );
-        })}
-      </div>
     </div>
   );
 }
@@ -636,4 +870,18 @@ function MapFocus({ center, selected, points }) {
   }, [map, center, selected, points]);
 
   return null;
+}
+
+function MapZoomControls() {
+  const map = useMap();
+  return (
+    <div className="mapZoomControls">
+      <button type="button" onClick={() => map.zoomIn()} aria-label="Zoom in">
+        +
+      </button>
+      <button type="button" onClick={() => map.zoomOut()} aria-label="Zoom out">
+        −
+      </button>
+    </div>
+  );
 }

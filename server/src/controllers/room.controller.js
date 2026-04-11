@@ -12,6 +12,8 @@ import ExitRequest from "../models/ExitRequest.js";
 import Offer from "../models/Offer.js";
 import Rule from "../models/Rule.js";
 import { evaluateRoomFraud } from "../services/fraud.service.js";
+import { applyAutoFraudPolicy } from "../services/autoFraud.service.js";
+import { notifySavedSearchMatches } from "../services/savedSearch.service.js";
 
 const normalizePhotoPath = (p) => {
     if (!p) return p;
@@ -23,6 +25,17 @@ const normalizePhotoPath = (p) => {
     return p;
 };
 
+const recalcRoomRatings = (room) => {
+    if (!room?.ratings?.length) {
+        room.ratingCount = 0;
+        room.ratingAvg = 0;
+        return;
+    }
+    const total = room.ratings.reduce((acc, item) => acc + (item.score || 0), 0);
+    room.ratingCount = room.ratings.length;
+    room.ratingAvg = Number((total / room.ratingCount).toFixed(2));
+};
+
 // Owner: create room
 const createRoom = async (req, res) => {
     try {
@@ -30,6 +43,7 @@ const createRoom = async (req, res) => {
             title,
             location,
             monthlyRent,
+            electricityUnitRate,
             rooms,
             bathrooms,
             facilities,
@@ -52,6 +66,14 @@ const createRoom = async (req, res) => {
         const rentNum = Number(monthlyRent);
         if (!Number.isFinite(rentNum) || rentNum < 0) {
             return res.status(400).json({ message: "monthlyRent must be a valid number" });
+        }
+
+        const elecRateNum =
+            electricityUnitRate === undefined || electricityUnitRate === null || electricityUnitRate === ""
+                ? 0
+                : Number(electricityUnitRate);
+        if (!Number.isFinite(elecRateNum) || elecRateNum < 0) {
+            return res.status(400).json({ message: "electricityUnitRate must be a valid number" });
         }
 
         const roomsNum = rooms === undefined || rooms === null ? 1 : Number(rooms);
@@ -104,6 +126,7 @@ const createRoom = async (req, res) => {
             title,
             location,
             monthlyRent: rentNum,
+            electricityUnitRate: elecRateNum,
             roomType: roomType || "1BHK",
             rooms: roomsNum,
             bathrooms: bathroomsNum,
@@ -119,7 +142,12 @@ const createRoom = async (req, res) => {
         roomDoc.fraudScore = score;
         roomDoc.fraudFlags = flags;
         roomDoc.isFlagged = isFlagged;
+        await applyAutoFraudPolicy(roomDoc, isFlagged);
         await roomDoc.save();
+
+        if (roomDoc.isPublished) {
+            setImmediate(() => notifySavedSearchMatches(roomDoc));
+        }
 
         res.status(201).json({ message: "Room created", room: roomDoc });
     } catch (err) {
@@ -202,7 +230,8 @@ const listRooms = async (req, res) => {
 
         let sortObj = { createdAt: -1 };
         if (sort === "price_asc") sortObj = { monthlyRent: 1 };
-        if (sort === "price_desc") sortObj = { monthlyRent: -1 };
+        else if (sort === "price_desc") sortObj = { monthlyRent: -1 };
+        else if (sort === "rating") sortObj = { ratingAvg: -1, ratingCount: -1, createdAt: -1 };
 
         const pageNum = Math.max(1, Number(page) || 1);
         const limitNum = Math.min(60, Math.max(1, Number(limit) || 12));
@@ -214,10 +243,11 @@ const listRooms = async (req, res) => {
             .sort(sortObj)
             .skip(skip)
             .limit(limitNum)
-            .populate("owner", "fullName kyc");
+            .populate("owner", "fullName kyc responseStats");
         const result = rooms.map((r) => {
             const obj = r.toObject();
             obj.isVerifiedOwner = obj.owner?.kyc?.status === "approved";
+            obj.isFastResponder = Boolean(obj.owner?.responseStats?.fastResponder);
             obj.photos = (obj.photos || []).map(normalizePhotoPath);
             return obj;
         });
@@ -236,24 +266,26 @@ const listRooms = async (req, res) => {
 
 const getRoomById = async (req, res) => {
     try {
-        const room = await Room.findById(req.params.id).populate("owner", "fullName phone email");
+        const room = await Room.findById(req.params.id)
+            .populate("owner", "fullName phone email responseStats")
+            .populate("ratings.user", "fullName");
         if (!room) return res.status(404).json({ message: "Room not found" });
 
-        if (!room.isPublished) {
-            let viewer = null;
-            const header = req.headers.authorization;
-            if (header && header.startsWith("Bearer ")) {
-                try {
-                    const token = header.split(" ")[1];
-                    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-                    viewer = await User.findById(decoded.id).select("_id role");
-                } catch {
-                    viewer = null;
-                }
+        let viewer = null;
+        const header = req.headers.authorization;
+        if (header && header.startsWith("Bearer ")) {
+            try {
+                const token = header.split(" ")[1];
+                const decoded = jwt.verify(token, process.env.JWT_SECRET);
+                viewer = await User.findById(decoded.id).select("_id role");
+            } catch {
+                viewer = null;
             }
+        }
 
+        if (!room.isPublished) {
             const isOwner = viewer && String(room.owner?._id || room.owner) === String(viewer._id);
-            const isAdmin = viewer && viewer.role === "admin";
+            const isAdmin = viewer && ["admin", "super_admin"].includes(viewer.role);
             if (!isOwner && !isAdmin) {
                 return res.status(404).json({ message: "Room not found" });
             }
@@ -261,6 +293,17 @@ const getRoomById = async (req, res) => {
 
         const obj = room.toObject();
         obj.photos = (obj.photos || []).map(normalizePhotoPath);
+        obj.isFastResponder = Boolean(obj.owner?.responseStats?.fastResponder);
+        let canRate = false;
+        if (viewer?.role === "tenant") {
+            const exitSettled = await ExitRequest.findOne({
+                room: room._id,
+                tenant: viewer._id,
+                status: "settled",
+            });
+            canRate = Boolean(exitSettled);
+        }
+        obj.canRate = canRate;
         res.json({ room: obj });
     } catch (err) {
         res.status(500).json({ message: "Server error" });
@@ -272,11 +315,12 @@ const featuredRooms = async (req, res) => {
         const rooms = await Room.find({ isPublished: true })
             .sort({ createdAt: -1 })
             .limit(6)
-            .populate("owner", "fullName kyc");
+            .populate("owner", "fullName kyc responseStats");
 
         const result = rooms.map((r) => {
             const obj = r.toObject();
             obj.isVerifiedOwner = obj.owner?.kyc?.status === "approved";
+            obj.isFastResponder = Boolean(obj.owner?.responseStats?.fastResponder);
             obj.photos = (obj.photos || []).map(normalizePhotoPath);
             return obj;
         });
@@ -327,6 +371,7 @@ const uploadPhotos = async (req, res) => {
         room.fraudScore = score;
         room.fraudFlags = flags;
         room.isFlagged = isFlagged;
+        await applyAutoFraudPolicy(room, isFlagged);
         await room.save();
 
         res.json({ message: "Photos uploaded", photos: room.photos, room });
@@ -353,6 +398,7 @@ const updateRoom = async (req, res) => {
             location,
             roomType,
             monthlyRent,
+            electricityUnitRate,
             rooms,
             bathrooms,
             description,
@@ -375,6 +421,13 @@ const updateRoom = async (req, res) => {
                 return res.status(400).json({ message: "monthlyRent must be a valid number" });
             }
             room.monthlyRent = rentNum;
+        }
+        if (electricityUnitRate !== undefined) {
+            const rateNum = Number(electricityUnitRate);
+            if (!Number.isFinite(rateNum) || rateNum < 0) {
+                return res.status(400).json({ message: "electricityUnitRate must be a valid number" });
+            }
+            room.electricityUnitRate = rateNum;
         }
         if (rooms !== undefined) {
             const roomsNum = Number(rooms);
@@ -423,6 +476,7 @@ const updateRoom = async (req, res) => {
         room.fraudScore = score;
         room.fraudFlags = flags;
         room.isFlagged = isFlagged;
+        await applyAutoFraudPolicy(room, isFlagged);
         await room.save();
 
         res.json({ message: "Room updated", room });
@@ -442,9 +496,20 @@ const publishRoom = async (req, res) => {
         }
 
         room.isPublished = true;
+
+        const { score, flags, isFlagged } = await evaluateRoomFraud(room);
+        room.fraudScore = score;
+        room.fraudFlags = flags;
+        room.isFlagged = isFlagged;
+        await applyAutoFraudPolicy(room, isFlagged);
         await room.save();
 
-        res.json({ message: "Room published", room });
+        if (room.isPublished) {
+            setImmediate(() => notifySavedSearchMatches(room));
+            return res.json({ message: "Room published", room });
+        }
+
+        res.json({ message: "Room flagged and unpublished", room });
     } catch (err) {
         res.status(500).json({ message: "Server error" });
     }
@@ -487,10 +552,59 @@ const deleteRoomPhoto = async (req, res) => {
         room.fraudScore = score;
         room.fraudFlags = flags;
         room.isFlagged = isFlagged;
+        await applyAutoFraudPolicy(room, isFlagged);
         await room.save();
 
         res.json({ message: "Photo removed", photos: room.photos, room });
     } catch (err) {
+        res.status(500).json({ message: "Server error" });
+    }
+};
+
+const rateRoom = async (req, res) => {
+    try {
+        const { score, comment } = req.body || {};
+        const numericScore = Number(score);
+        if (!Number.isFinite(numericScore) || numericScore < 1 || numericScore > 5) {
+            return res.status(400).json({ message: "Score must be between 1 and 5" });
+        }
+
+        const room = await Room.findById(req.params.id);
+        if (!room) return res.status(404).json({ message: "Room not found" });
+        if (req.user.role !== "tenant") {
+            return res.status(403).json({ message: "Only tenants can rate rooms" });
+        }
+        const exitSettled = await ExitRequest.findOne({
+            room: room._id,
+            tenant: req.user._id,
+            status: "settled",
+        });
+        if (!exitSettled) {
+            return res.status(403).json({ message: "Exit must be settled before rating this room" });
+        }
+
+        room.ratings = room.ratings || [];
+        const existing = room.ratings.find((r) => String(r.user) === String(req.user._id));
+        const cleanComment = typeof comment === "string" ? comment.trim().slice(0, 500) : "";
+
+        if (existing) {
+            existing.score = numericScore;
+            existing.comment = cleanComment;
+            existing.createdAt = new Date();
+        } else {
+            room.ratings.unshift({
+                user: req.user._id,
+                score: numericScore,
+                comment: cleanComment,
+            });
+        }
+
+        recalcRoomRatings(room);
+        await room.save();
+        await room.populate("ratings.user", "fullName");
+        res.json({ message: "Rating saved", room: room.toObject({ virtuals: true }) });
+    } catch (err) {
+        console.log("Rate room error:", err.message);
         res.status(500).json({ message: "Server error" });
     }
 };
@@ -529,6 +643,22 @@ const safeUnlink = (p) => {
 const cleanupRoomResources = async (room) => {
     const photos = room.photos || [];
     photos.forEach((p) => safeUnlink(p));
+
+    const uploadsDir = path.join(process.cwd(), "uploads", "rooms", String(room._id));
+    fs.rm(uploadsDir, { recursive: true, force: true }, () => {});
+
+    const unlinkSignature = (raw) => {
+        if (!raw) return;
+        const normalized = raw.startsWith("/") ? raw : `/${raw}`;
+        safeUnlink(normalized);
+    };
+    const relatedAgreements = await Agreement.find({ room: room._id }).select(
+        "tenantSignatureUrl ownerSignatureUrl"
+    );
+    relatedAgreements.forEach((agreement) => {
+        unlinkSignature(agreement.tenantSignatureUrl);
+        unlinkSignature(agreement.ownerSignatureUrl);
+    });
 
     await Promise.all([
         Request.deleteMany({ room: room._id }),
@@ -650,5 +780,6 @@ export {
     unpublishRoom,
     deleteRoom,
     nearbyPlaces,
+    rateRoom,
     cleanupRoomResources,
 };

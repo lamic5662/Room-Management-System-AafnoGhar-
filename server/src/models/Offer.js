@@ -20,6 +20,7 @@ const offerSchema = new mongoose.Schema(
 
     ownerCounterRent: { type: Number, default: 0 },
     ownerReply: { type: String, default: "", trim: true },
+    lastTenantActionAt: { type: Date, default: null },
   },
   { timestamps: true }
 );

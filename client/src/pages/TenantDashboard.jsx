@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import http from "../api/http";
 import Spinner from "../components/Spinner";
 import StatCard from "../components/StatCard";
@@ -29,6 +30,8 @@ export default function TenantDashboard() {
 
   if (loading) return <Spinner text={t("Loading tenant dashboard...")} />;
 
+  const ratePrompt = stats?.ratePrompt || null;
+
   return (
     <div>
       <div className="row" style={{ justifyContent: "space-between", flexWrap: "wrap" }}>
@@ -48,6 +51,25 @@ export default function TenantDashboard() {
         <StatCard label={t("Open Complaints")} value={stats?.openComplaints} to="/tenant/complaints" hint={t("View replies")} />
         <StatCard label={t("Browse Rooms")} value="→" to="/rooms" hint={t("Find a room")} />
       </div>
+
+      {ratePrompt?.roomId ? (
+        <>
+          <div className="spacer" />
+          <div className="card cardPad">
+            <div className="row" style={{ justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+              <div>
+                <div style={{ fontWeight: 900 }}>{t("Rate your last room")}</div>
+                <div className="muted" style={{ marginTop: 4, fontSize: 13 }}>
+                  {ratePrompt.roomTitle}
+                </div>
+              </div>
+              <Link className="btn" to={`/rooms/${ratePrompt.roomId}#ratings`}>
+                {t("Leave a review")}
+              </Link>
+            </div>
+          </div>
+        </>
+      ) : null}
     </div>
   );
 }

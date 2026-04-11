@@ -18,6 +18,7 @@ This repository hosts the full AafnoGhar platform: a React/Vite frontend, an Exp
 3. Start the server: `npm run dev` inside `server/`.
 4. Start the frontend: `npm run dev` inside `client/`.
 5. Visit `http://localhost:5173` (default Vite port) to interact with the UI once the API is running.
+6. Tokens respect `JWT_TTL` (default `7d`) so you can shorten or extend session lifetime by updating `server/.env`.
 
 ## Testing & utilities
 
@@ -34,4 +35,3 @@ This repository hosts the full AafnoGhar platform: a React/Vite frontend, an Exp
 
 - Keep the timeline consistent with `server/.env` secrets (Mongo URI, mailer).
 - When adding features, update the smoke script and documentation so the CI workflow remains reliable.
-

@@ -8,3 +8,6 @@ build/
 logs/
 *.log
 *.tmp
+server/uploads/
+server/agreement.pdf
+server/agreement_signed.pdf

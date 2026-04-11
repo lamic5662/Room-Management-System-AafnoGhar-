@@ -7,6 +7,8 @@ import L from "leaflet";
 import markerIcon from "leaflet/dist/images/marker-icon.png";
 import markerShadow from "leaflet/dist/images/marker-shadow.png";
 import { useI18n } from "../context/I18nContext";
+import NearbyList from "../components/NearbyList";
+import { hasNearbyEntries } from "../utils/nearby";
 
 export default function AddRoom() {
   const navigate = useNavigate();
@@ -19,6 +21,7 @@ export default function AddRoom() {
     location: "",
     roomType: "1BHK",
     monthlyRent: "",
+    electricityUnitRate: "",
     rooms: 1,
     bathrooms: 1,
     description: "",
@@ -70,15 +73,30 @@ export default function AddRoom() {
       return next;
     });
 
+  const buildAddressLabel = (address) => {
+    if (!address) return "";
+    const keys = ["area", "neighbourhood", "suburb", "city_district", "city", "town", "village", "county", "state", "country"];
+    const parts = keys.map((key) => address[key]).filter(Boolean);
+    return parts.join(", ");
+  };
+
   const reverseGeocode = async (lat, lng) => {
+    const latNum = Number(lat);
+    const lngNum = Number(lng);
+    const fallbackText = `Lat ${latNum.toFixed(4)}, Lng ${lngNum.toFixed(4)}`;
     try {
       setGeoLoading(true);
-      const res = await http.get(`/api/geo/reverse?lat=${lat}&lng=${lng}`);
-      if (res.data?.locationText && autoLocation) {
-        update("location", res.data.locationText);
+      const res = await http.get(`/api/geo/reverse?lat=${latNum}&lng=${lngNum}`);
+      const locationText = String(res.data?.locationText || "").trim();
+      const addressLabel = buildAddressLabel(res.data?.address);
+      const resolvedText = locationText || addressLabel || fallbackText;
+      if (autoLocation) {
+        update("location", resolvedText);
       }
     } catch {
-      // ignore
+      if (autoLocation) {
+        update("location", fallbackText);
+      }
     } finally {
       setGeoLoading(false);
     }
@@ -95,15 +113,22 @@ export default function AddRoom() {
     }
   };
 
+  const nearbySeq = useRef(0);
   const fetchNearby = async (lat, lng) => {
+    const seq = ++nearbySeq.current;
+    setNearbyLoading(true);
+    setNearby(null);
     try {
-      setNearbyLoading(true);
       const res = await http.get(`/api/geo/nearby?lat=${lat}&lng=${lng}`);
+      if (nearbySeq.current !== seq) return;
       setNearby(res.data || null);
     } catch {
+      if (nearbySeq.current !== seq) return;
       setNearby(null);
     } finally {
-      setNearbyLoading(false);
+      if (nearbySeq.current === seq) {
+        setNearbyLoading(false);
+      }
     }
   };
 
@@ -148,6 +173,9 @@ export default function AddRoom() {
     if (!form.location.trim()) nextErrors.location = "Location is required";
     if (!form.roomType) nextErrors.roomType = "Room type is required";
     if (!form.monthlyRent || Number(form.monthlyRent) <= 0) nextErrors.monthlyRent = "Monthly rent must be > 0";
+    if (form.electricityUnitRate !== "" && Number(form.electricityUnitRate) < 0) {
+      nextErrors.electricityUnitRate = "Electricity unit rate must be >= 0";
+    }
     if (form.roomType !== "Single" && form.roomType !== "Other") {
       if (!form.rooms || Number(form.rooms) < 1) nextErrors.rooms = "Rooms must be at least 1";
       if (!form.bathrooms || Number(form.bathrooms) < 1) nextErrors.bathrooms = "Bathrooms must be at least 1";
@@ -244,6 +272,7 @@ export default function AddRoom() {
         location: form.location,
         roomType: form.roomType,
         monthlyRent: Number(form.monthlyRent),
+        electricityUnitRate: form.electricityUnitRate === "" ? 0 : Number(form.electricityUnitRate),
         rooms: Number(form.rooms),
         bathrooms: Number(form.bathrooms),
         description: form.description,
@@ -295,10 +324,6 @@ export default function AddRoom() {
           <h1 className="h1">Add Room</h1>
           <p className="muted" style={{ marginTop: 6 }}>{t("Post a new room for tenants.")}</p>
         </div>
-
-        <button className="btn btnOutline" onClick={() => navigate("/rooms")}>
-          {t("Back")}
-        </button>
       </div>
 
       <div className="spacer" />
@@ -418,6 +443,21 @@ export default function AddRoom() {
                 style={{ fontSize: 20, fontWeight: 900, height: 52 }}
               />
               {errors.monthlyRent ? <div className="fieldErr">{errors.monthlyRent}</div> : null}
+            </div>
+            <div style={{ flex: "1 1 200px" }}>
+              <label className="muted" style={{ fontSize: 13 }}>{t("Electricity Rate (NPR/unit)")}</label>
+              <input
+                className={`input ${errors.electricityUnitRate ? "inputErr" : ""}`}
+                type="number"
+                min="0"
+                value={form.electricityUnitRate}
+                onChange={(e) => {
+                  update("electricityUnitRate", e.target.value);
+                  if (errors.electricityUnitRate) setErrors((p) => ({ ...p, electricityUnitRate: "" }));
+                }}
+                placeholder={t("e.g. 12")}
+              />
+              {errors.electricityUnitRate ? <div className="fieldErr">{errors.electricityUnitRate}</div> : null}
             </div>
             {form.roomType !== "Single" && form.roomType !== "Other" ? (
               <>
@@ -654,14 +694,14 @@ export default function AddRoom() {
                 <div className="roomPreviewNearbyTitle">{t("Nearby (from map pin)")}</div>
                 {nearbyLoading ? (
                   <div className="roomPreviewNearbyText">{t("Loading nearby places…")}</div>
-                ) : !nearby ? (
+                ) : !hasNearbyEntries(nearby) ? (
                   <div className="roomPreviewNearbyText">{t("No nearby data yet.")}</div>
                 ) : (
                   <div className="roomPreviewNearbyList">
-                    <NearbyLine title={t("Hospitals")} items={nearby.hospitals} />
-                    <NearbyLine title={t("Colleges")} items={nearby.colleges} />
-                    <NearbyLine title={t("Markets")} items={nearby.markets} />
-                    <NearbyLine title={t("Bus Stops")} items={nearby.busStops} />
+                    <NearbyList title={t("Hospitals")} items={nearby.hospitals} />
+                    <NearbyList title={t("Colleges")} items={nearby.colleges} />
+                    <NearbyList title={t("Markets")} items={nearby.markets} />
+                    <NearbyList title={t("Bus Stops")} items={nearby.busStops} />
                   </div>
                 )}
               </div>
@@ -754,19 +794,4 @@ function Toggle({ label, value, onChange }) {
       </button>
     </div>
   );
-}
-
-function NearbyLine({ title, items }) {
-  if (!items || items.length === 0) {
-    return (
-      <div className="roomPreviewNearbyText">
-        {title}: not found
-      </div>
-    );
-  }
-  const text = items
-    .slice(0, 3)
-    .map((i) => `${i.name}${i.distance ? ` • ${i.distance}m` : ""}`)
-    .join(", ");
-  return <div className="roomPreviewNearbyText">{title}: {text}</div>;
 }

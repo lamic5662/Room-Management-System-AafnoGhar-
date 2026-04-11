@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import http from "../api/http";
 import { useToast } from "../context/ToastContext";
 import { useI18n } from "../context/I18nContext";
+import { formatRoomLocation } from "../utils/roomLocation";
 
 export default function MyRooms() {
   const { showToast } = useToast();
@@ -74,15 +75,18 @@ export default function MyRooms() {
           {rooms.map((r) => (
             <div key={r._id} className="card cardPad">
               <div className="row" style={{ justifyContent: "space-between", alignItems: "flex-start" }}>
-                <div>
-                  <div style={{ fontWeight: 900, fontSize: 16 }}>{r.title}</div>
-                  <div className="muted" style={{ marginTop: 4 }}>{r.location}</div>
-                </div>
+                  <div>
+                    <div style={{ fontWeight: 900, fontSize: 16 }}>{r.title}</div>
+                    <div className="muted" style={{ marginTop: 4 }}>
+                      {formatRoomLocation(r.location, r.geo) || t("Location not provided")}
+                    </div>
+                  </div>
                 <div style={{ textAlign: "right" }}>
                   <button
                     type="button"
                     className="iconBtn"
                     title={t("Delete room")}
+                    data-tip={t("Delete room")}
                     onClick={() => removeRoom(r._id)}
                     style={{ marginBottom: 6 }}
                   >
