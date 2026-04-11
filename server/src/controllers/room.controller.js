@@ -14,6 +14,7 @@ import Rule from "../models/Rule.js";
 import { evaluateRoomFraud } from "../services/fraud.service.js";
 import { applyAutoFraudPolicy } from "../services/autoFraud.service.js";
 import { notifySavedSearchMatches } from "../services/savedSearch.service.js";
+import { isSupabaseEnabled, uploadRoomPhoto } from "../utils/supabaseStorage.js";
 
 const normalizePhotoPath = (p) => {
     if (!p) return p;
@@ -363,7 +364,22 @@ const uploadPhotos = async (req, res) => {
         const files = req.files || [];
         if (!files.length) return res.status(400).json({ message: "No photos uploaded" });
 
-        const paths = files.map((f) => `/uploads/rooms/${f.filename}`);
+        const useSupabase = isSupabaseEnabled();
+        const paths = [];
+        for (const f of files) {
+            if (useSupabase && f.buffer) {
+                const url = await uploadRoomPhoto({
+                    buffer: f.buffer,
+                    contentType: f.mimetype,
+                    roomId: room._id,
+                    originalName: f.originalname,
+                });
+                if (url) paths.push(url);
+            } else if (f.filename) {
+                paths.push(`/uploads/rooms/${f.filename}`);
+            }
+        }
+        if (!paths.length) return res.status(500).json({ message: "Photo upload failed" });
         room.photos = [...room.photos, ...paths].slice(0, 5);
         await room.save();
 

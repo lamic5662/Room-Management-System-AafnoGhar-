@@ -189,7 +189,29 @@ const generateAgreementPdf = async (req, res) => {
     sectionTitle("Signatures");
     doc.fontSize(9);
 
-    const drawSignatureBlock = (label, sigUrl) => {
+    const loadSignature = async (sigUrl) => {
+      if (!sigUrl) return null;
+      if (sigUrl.startsWith("http")) {
+        try {
+          const resp = await fetch(sigUrl);
+          if (!resp.ok) return null;
+          const buf = await resp.arrayBuffer();
+          return Buffer.from(buf);
+        } catch {
+          return null;
+        }
+      }
+      const rel = sigUrl.replace(/^\/+/, "");
+      const p = path.join(process.cwd(), rel);
+      if (!fs.existsSync(p)) return null;
+      try {
+        return fs.readFileSync(p);
+      } catch {
+        return null;
+      }
+    };
+
+    const drawSignatureBlock = async (label, sigUrl) => {
       const boxX = 160;
       const boxW = 180;
       const boxH = 52;
@@ -201,16 +223,11 @@ const generateAgreementPdf = async (req, res) => {
       doc.fontSize(9).font("Helvetica").fillColor("#111827").text(label, 40, drawY + 18);
       doc.rect(boxX, drawY, boxW, boxH).strokeColor("#111827").lineWidth(0.5).stroke();
 
-      if (sigUrl) {
-        const rel = sigUrl.replace(/^\/+/, "");
-        const p = path.join(process.cwd(), rel);
-        if (fs.existsSync(p)) {
-          try {
-            doc.image(p, boxX + 6, drawY + 6, { fit: [boxW - 12, boxH - 12] });
-          } catch {}
-        } else {
-          doc.fontSize(8).fillColor("#6b7280").text("Not provided", boxX + 10, drawY + 18);
-        }
+      const img = await loadSignature(sigUrl);
+      if (img) {
+        try {
+          doc.image(img, boxX + 6, drawY + 6, { fit: [boxW - 12, boxH - 12] });
+        } catch {}
       } else {
         doc.fontSize(8).fillColor("#6b7280").text("Not provided", boxX + 10, drawY + 18);
       }
@@ -218,8 +235,8 @@ const generateAgreementPdf = async (req, res) => {
       doc.moveDown(2.8);
     };
 
-    drawSignatureBlock("Owner Signature:", agreement.ownerSignatureUrl);
-    drawSignatureBlock("Tenant Signature:", agreement.tenantSignatureUrl);
+    await drawSignatureBlock("Owner Signature:", agreement.ownerSignatureUrl);
+    await drawSignatureBlock("Tenant Signature:", agreement.tenantSignatureUrl);
 
     doc.moveDown(1);
     doc.fontSize(8).fillColor("#6b7280").text(

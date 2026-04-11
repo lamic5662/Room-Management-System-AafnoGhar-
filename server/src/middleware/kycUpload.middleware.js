@@ -2,10 +2,13 @@ import fs from "fs";
 import path from "path";
 import multer from "multer";
 
+const hasSupabase = Boolean(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY);
 const kycDir = path.join(process.cwd(), "uploads", "kyc");
-fs.mkdirSync(kycDir, { recursive: true });
+if (!hasSupabase) {
+    fs.mkdirSync(kycDir, { recursive: true });
+}
 
-const storage = multer.diskStorage({
+const storage = hasSupabase ? multer.memoryStorage() : multer.diskStorage({
     destination: (req, file, cb) => cb(null, kycDir),
     filename: (req, file, cb) => {
         const ext = path.extname(file.originalname) || ".png";

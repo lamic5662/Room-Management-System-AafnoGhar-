@@ -2,10 +2,13 @@ import fs from "fs";
 import path from "path";
 import multer from "multer";
 
+const hasSupabase = Boolean(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY);
 const roomsDir = path.join(process.cwd(), "uploads", "rooms");
-fs.mkdirSync(roomsDir, { recursive: true });
+if (!hasSupabase) {
+  fs.mkdirSync(roomsDir, { recursive: true });
+}
 
-const storage = multer.diskStorage({
+const storage = hasSupabase ? multer.memoryStorage() : multer.diskStorage({
   destination: (req, file, cb) => cb(null, roomsDir),
   filename: (req, file, cb) => {
     let ext = path.extname(file.originalname);

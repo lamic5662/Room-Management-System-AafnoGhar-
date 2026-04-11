@@ -7,6 +7,7 @@ import Room from "../models/Room.js";
 import Visit from "../models/Visit.js";
 import { emitVisitDeletesByRoom } from "../services/visitRealtime.service.js";
 import { notifyUser } from "../services/notify.service.js";
+import { isSupabaseEnabled, uploadSignatureImage } from "../utils/supabaseStorage.js";
 
 // helper
 const addMonths = (date, months) => {
@@ -261,16 +262,29 @@ const signTenant = async (req, res) => {
 
         if (!req.file) return res.status(400).json({ message: "Signature file required" });
 
-        // delete old file if exists
-        if (agreement.tenantSignatureUrl) {
+        const useSupabase = isSupabaseEnabled();
+        if (agreement.tenantSignatureUrl && !agreement.tenantSignatureUrl.startsWith("http")) {
             const oldPath = path.join(process.cwd(), agreement.tenantSignatureUrl.replace(/^\/+/, ""));
             if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
         }
 
-        agreement.tenantSignatureUrl = `uploads/signatures/${req.file.filename}`;
+        if (useSupabase && req.file.buffer) {
+            agreement.tenantSignatureUrl = await uploadSignatureImage({
+                buffer: req.file.buffer,
+                contentType: req.file.mimetype,
+                agreementId: agreement._id,
+                role: "tenant",
+                originalName: req.file.originalname,
+            });
+        } else {
+            agreement.tenantSignatureUrl = `uploads/signatures/${req.file.filename}`;
+        }
         await agreement.save();
 
-        res.json({ message: "Tenant signature saved", tenantSignatureUrl: `/${agreement.tenantSignatureUrl}` });
+        const url = agreement.tenantSignatureUrl.startsWith("http")
+            ? agreement.tenantSignatureUrl
+            : `/${agreement.tenantSignatureUrl}`;
+        res.json({ message: "Tenant signature saved", tenantSignatureUrl: url });
     } catch (err) {
         console.log("Tenant sign error:", err.message);
         res.status(500).json({ message: "Server error" });
@@ -291,16 +305,29 @@ const signOwner = async (req, res) => {
 
         if (!req.file) return res.status(400).json({ message: "Signature file required" });
 
-        // delete old file if exists
-        if (agreement.ownerSignatureUrl) {
+        const useSupabase = isSupabaseEnabled();
+        if (agreement.ownerSignatureUrl && !agreement.ownerSignatureUrl.startsWith("http")) {
             const oldPath = path.join(process.cwd(), agreement.ownerSignatureUrl.replace(/^\/+/, ""));
             if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
         }
 
-        agreement.ownerSignatureUrl = `uploads/signatures/${req.file.filename}`;
+        if (useSupabase && req.file.buffer) {
+            agreement.ownerSignatureUrl = await uploadSignatureImage({
+                buffer: req.file.buffer,
+                contentType: req.file.mimetype,
+                agreementId: agreement._id,
+                role: "owner",
+                originalName: req.file.originalname,
+            });
+        } else {
+            agreement.ownerSignatureUrl = `uploads/signatures/${req.file.filename}`;
+        }
         await agreement.save();
 
-        res.json({ message: "Owner signature saved", ownerSignatureUrl: `/${agreement.ownerSignatureUrl}` });
+        const url = agreement.ownerSignatureUrl.startsWith("http")
+            ? agreement.ownerSignatureUrl
+            : `/${agreement.ownerSignatureUrl}`;
+        res.json({ message: "Owner signature saved", ownerSignatureUrl: url });
     } catch (err) {
         console.log("Owner sign error:", err.message);
         res.status(500).json({ message: "Server error" });

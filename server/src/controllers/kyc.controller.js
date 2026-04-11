@@ -3,6 +3,7 @@ import Room from "../models/Room.js";
 import { evaluateRoomFraud } from "../services/fraud.service.js";
 import { notifyUser } from "../services/notify.service.js";
 import { logAdminAction } from "../services/auditLog.service.js";
+import { isSupabaseEnabled, uploadKycDoc } from "../utils/supabaseStorage.js";
 
 const updateKycStatus = async (userId, status, adminNote = "", checks = {}, adminId = null) => {
     if (!["approved", "rejected"].includes(status)) {
@@ -43,6 +44,7 @@ const updateKycStatus = async (userId, status, adminNote = "", checks = {}, admi
 
 const normalizePath = (p) => {
     if (!p) return "";
+    if (p.startsWith("http")) return p;
     return p.startsWith("/") ? p : `/${p}`;
 };
 
@@ -105,9 +107,40 @@ const submitKyc = async (req, res) => {
                 user.kyc.fields = {};
             }
         }
-        user.kyc.docFrontUrl = front ? `/uploads/kyc/${front.filename}` : user.kyc.docFrontUrl;
-        user.kyc.docBackUrl = back ? `/uploads/kyc/${back.filename}` : user.kyc.docBackUrl;
-        user.kyc.selfieUrl = selfie ? `/uploads/kyc/${selfie.filename}` : user.kyc.selfieUrl;
+        const useSupabase = isSupabaseEnabled();
+        if (front) {
+            user.kyc.docFrontUrl = useSupabase && front.buffer
+                ? await uploadKycDoc({
+                    buffer: front.buffer,
+                    contentType: front.mimetype,
+                    userId: user._id,
+                    kind: "front",
+                    originalName: front.originalname,
+                })
+                : `/uploads/kyc/${front.filename}`;
+        }
+        if (back) {
+            user.kyc.docBackUrl = useSupabase && back.buffer
+                ? await uploadKycDoc({
+                    buffer: back.buffer,
+                    contentType: back.mimetype,
+                    userId: user._id,
+                    kind: "back",
+                    originalName: back.originalname,
+                })
+                : `/uploads/kyc/${back.filename}`;
+        }
+        if (selfie) {
+            user.kyc.selfieUrl = useSupabase && selfie.buffer
+                ? await uploadKycDoc({
+                    buffer: selfie.buffer,
+                    contentType: selfie.mimetype,
+                    userId: user._id,
+                    kind: "selfie",
+                    originalName: selfie.originalname,
+                })
+                : `/uploads/kyc/${selfie.filename}`;
+        }
 
     user.kyc.status = "pending";
     user.kyc.adminNote = "";
@@ -177,9 +210,40 @@ const updateKyc = async (req, res) => {
                 user.kyc.fields = {};
             }
         }
-        user.kyc.docFrontUrl = front ? `/uploads/kyc/${front.filename}` : user.kyc.docFrontUrl;
-        user.kyc.docBackUrl = back ? `/uploads/kyc/${back.filename}` : user.kyc.docBackUrl;
-        user.kyc.selfieUrl = selfie ? `/uploads/kyc/${selfie.filename}` : user.kyc.selfieUrl;
+        const useSupabase = isSupabaseEnabled();
+        if (front) {
+            user.kyc.docFrontUrl = useSupabase && front.buffer
+                ? await uploadKycDoc({
+                    buffer: front.buffer,
+                    contentType: front.mimetype,
+                    userId: user._id,
+                    kind: "front",
+                    originalName: front.originalname,
+                })
+                : `/uploads/kyc/${front.filename}`;
+        }
+        if (back) {
+            user.kyc.docBackUrl = useSupabase && back.buffer
+                ? await uploadKycDoc({
+                    buffer: back.buffer,
+                    contentType: back.mimetype,
+                    userId: user._id,
+                    kind: "back",
+                    originalName: back.originalname,
+                })
+                : `/uploads/kyc/${back.filename}`;
+        }
+        if (selfie) {
+            user.kyc.selfieUrl = useSupabase && selfie.buffer
+                ? await uploadKycDoc({
+                    buffer: selfie.buffer,
+                    contentType: selfie.mimetype,
+                    userId: user._id,
+                    kind: "selfie",
+                    originalName: selfie.originalname,
+                })
+                : `/uploads/kyc/${selfie.filename}`;
+        }
 
         user.kyc.status = "pending";
         user.kyc.adminNote = "";

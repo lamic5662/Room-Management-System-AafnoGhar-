@@ -2,6 +2,7 @@ import bcrypt from "bcryptjs";
 import fs from "fs";
 import path from "path";
 import User from "../models/User.js";
+import { isSupabaseEnabled, uploadAvatarImage } from "../utils/supabaseStorage.js";
 
 const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -97,14 +98,23 @@ const updateAvatar = async (req, res) => {
     const user = await User.findById(req.user._id);
     if (!user) return res.status(404).json({ message: "User not found" });
 
-    if (user.avatarUrl) {
+    if (user.avatarUrl && !user.avatarUrl.startsWith("http")) {
       const idx = user.avatarUrl.indexOf("/uploads/");
       const rel = idx !== -1 ? user.avatarUrl.slice(idx + "/uploads/".length) : user.avatarUrl.replace(/^\/+/, "");
       const absPath = path.join(process.cwd(), "uploads", rel);
       fs.promises.unlink(absPath).catch(() => {});
     }
 
-    user.avatarUrl = `/uploads/avatars/${file.filename}`;
+    if (isSupabaseEnabled() && file.buffer) {
+      user.avatarUrl = await uploadAvatarImage({
+        buffer: file.buffer,
+        contentType: file.mimetype,
+        userId: user._id,
+        originalName: file.originalname,
+      });
+    } else {
+      user.avatarUrl = `/uploads/avatars/${file.filename}`;
+    }
     await user.save();
 
     const safeUser = await User.findById(user._id).select("-password");
@@ -120,7 +130,7 @@ const removeAvatar = async (req, res) => {
     const user = await User.findById(req.user._id);
     if (!user) return res.status(404).json({ message: "User not found" });
 
-    if (user.avatarUrl) {
+    if (user.avatarUrl && !user.avatarUrl.startsWith("http")) {
       const idx = user.avatarUrl.indexOf("/uploads/");
       const rel = idx !== -1 ? user.avatarUrl.slice(idx + "/uploads/".length) : user.avatarUrl.replace(/^\/+/, "");
       const absPath = path.join(process.cwd(), "uploads", rel);
