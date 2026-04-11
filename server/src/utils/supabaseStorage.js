@@ -44,7 +44,7 @@ const uploadToBucket = async ({ bucket, fileName, buffer, contentType }) => {
     .from(bucket)
     .upload(fileName, buffer, { contentType, upsert: false });
   if (error) {
-    throw new Error(error.message || "Supabase upload failed");
+    throw new Error(`Supabase upload failed: ${error.message || "unknown error"}`);
   }
 
   const { data } = supabase.storage.from(bucket).getPublicUrl(fileName);

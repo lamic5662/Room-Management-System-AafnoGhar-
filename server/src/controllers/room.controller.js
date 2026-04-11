@@ -261,7 +261,8 @@ const listRooms = async (req, res) => {
             rooms: result,
         });
     } catch (err) {
-        res.status(500).json({ message: "Server error" });
+        console.log("Room photo upload error:", err?.message || err);
+        res.status(500).json({ message: err?.message || "Server error" });
     }
 };
 
