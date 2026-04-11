@@ -3,7 +3,7 @@ import { io } from "socket.io-client";
 import http from "../api/http";
 
 const NotificationContext = createContext(null);
-const API = `http://${window.location.hostname}:5001`;
+const API = import.meta.env.VITE_API_URL || `http://${window.location.hostname}:5001`;
 
 export function NotificationProvider({ children }) {
   const [items, setItems] = useState([]);

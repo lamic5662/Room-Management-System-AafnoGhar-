@@ -6,7 +6,7 @@ import Spinner from "../components/Spinner";
 import { useToast } from "../context/ToastContext";
 import { useI18n } from "../context/I18nContext";
 
-const API = `http://${window.location.hostname}:5001`;
+const API = import.meta.env.VITE_API_URL || `http://${window.location.hostname}:5001`;
 const REACTIONS = ["👍", "❤️", "😂", "😮"];
 
 export default function AgreementChat() {
